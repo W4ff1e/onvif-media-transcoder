@@ -2,7 +2,6 @@
 // This module contains all the hardcoded ONVIF SOAP responses
 
 use chrono::{Datelike, Timelike};
-use uuid;
 
 pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String {
     format!(
