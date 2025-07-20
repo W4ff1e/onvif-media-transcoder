@@ -1,7 +1,10 @@
 # ONVIF Media Transcoder
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/W4ff1e/onvif-media-transcoder/docker-publish.yml?branch=main&label=build)](https://github.com/W4ff1e/onvif-media-transcoder/actions/workflows/docker-publish.yml)
+[![Docker Hub](https://img.shields.io/docker/pulls/w4ff1e/onvif-media-transcoder?logo=docker)](https://hub.docker.com/r/w4ff1e/onvif-media-transcoder)
+[![Docker Image Version](https://img.shields.io/docker/v/w4ff1e/onvif-media-transcoder?logo=docker&sort=semver)](https://hub.docker.com/r/w4ff1e/onvif-media-transcoder/tags)
+[![Docker Image Size](https://img.shields.io/docker/image-size/w4ff1e/onvif-media-transcoder/latest?logo=docker)](https://hub.docker.com/r/w4ff1e/onvif-media-transcoder)
 [![ONVIF](https://img.shields.io/badge/ONVIF-compatible-green.svg)](https://www.onvif.org/)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![Security](https://img.shields.io/badge/security-policy-red.svg)](SECURITY.md)
@@ -26,6 +29,7 @@ profiles, and authentication-protected endpoints for seamless integration with O
   - [Quick Start](#quick-start)
     - [Quick Start Script](#quick-start-script)
     - [Docker Run](#docker-run)
+    - [Available Docker Tags](#available-docker-tags)
     - [Docker Compose](#docker-compose)
     - [Environment Variables](#environment-variables)
   - [Architecture](#architecture)
@@ -52,6 +56,9 @@ profiles, and authentication-protected endpoints for seamless integration with O
     - [Development Workflow](#development-workflow)
   - [Contributing](#contributing)
   - [Security](#security)
+    - [Important Security Notice](#important-security-notice)
+    - [Key Security Considerations](#key-security-considerations)
+    - [Reporting Security Issues](#reporting-security-issues)
   - [License](#license)
   - [Authors](#authors)
 
