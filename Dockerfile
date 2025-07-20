@@ -16,14 +16,21 @@ COPY Cargo.toml Cargo.lock ./
 # Create a dummy main.rs to build dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies (this layer will be cached unless Cargo.toml/Cargo.lock changes)
-RUN cargo build --release && rm -rf src
+# Build dependencies with cache mount (this will cache Rust dependencies)
+RUN --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release && rm -rf src
 
 # Copy the actual source code
 COPY src ./src
 
-# Build the actual application (only rebuilds if source code changes)
-RUN cargo build --release
+# Build the actual application with cache mount
+RUN --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release && \
+    cp target/release/onvif-media-transcoder /tmp/onvif-media-transcoder
 
 # Runtime stage - minimal image for running the application
 FROM alpine:latest
@@ -41,7 +48,7 @@ COPY mediamtx.yml /etc/mediamtx.yml
 RUN chmod +x /entrypoint.sh
 
 # Copy the built binary from the builder stage
-COPY --from=builder /app/target/release/onvif-media-transcoder /usr/local/bin/
+COPY --from=builder /tmp/onvif-media-transcoder /usr/local/bin/
 
 # Set environment variables with default values
 ENV INPUT_URL="https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8"
