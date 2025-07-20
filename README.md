@@ -184,22 +184,22 @@ The transcoder consists of four integrated components working together to provid
 4. **MediaMTX RTSP Server**: Professional RTSP server for reliable stream delivery to ONVIF clients
 
 ```text
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Input Stream  │───▶│   FFmpeg         │───▶│   MediaMTX      │
-│  (HLS/MP4/etc)  │    │   Transcoder     │    │   RTSP Server   │
-└─────────────────┘    └──────────────────┘    └─────────┬───────┘
-                                                         │
-                                                         ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  ONVIF Clients  │◀───│   ONVIF Service  │◀───│  RTSP Stream    │
-│                 │    │   (Port 8080)    │    │  (Port 8554)    │
-└─────────┬───────┘    └─────────┬────────┘    └─────────────────┘
-          │                      │
-          ▼                      ▲
-┌─────────────────┐    ┌──────────────────┐
-│  WS-Discovery   │───▶│  Device          │
-│  (Port 3702)    │    │  Discovery       │
-└─────────────────┘    └──────────────────┘
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Input Stream  │──▶│     FFmpeg      │──▶│    MediaMTX     │
+│  (HLS/MP4/etc)  │    │   Transcoder    │    │   RTSP Server   │
+└─────────────────┘    └─────────────────┘    └────────┬────────┘
+                                                       │
+                                                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  ONVIF Clients  │◀──│  ONVIF Service  │◀──│  RTSP Stream    │
+│                 │    │   (Port 8080)   │    │   (Port 8554)   │
+└────────┬────────┘    └────────┬────────┘    └─────────────────┘
+         │                      │
+         ▼                      ▲
+┌─────────────────┐    ┌─────────────────┐
+│  WS-Discovery   │──▶│     Device      │
+│   (Port 3702)   │    │   Discovery     │
+└─────────────────┘    └─────────────────┘
 ```
 
 **Data Flow:**
