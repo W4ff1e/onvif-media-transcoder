@@ -1038,3 +1038,248 @@ fn send_unsupported_endpoint_response(
     let body = get_unsupported_endpoint_response(endpoint);
     send_soap_response(stream, &body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_public_endpoint() {
+        // Test public endpoints that don't require authentication
+        assert!(is_public_endpoint("<GetCapabilities/>"));
+        assert!(is_public_endpoint(
+            "<soap:Body><GetCapabilities/></soap:Body>"
+        ));
+        assert!(is_public_endpoint(
+            "<?xml version=\"1.0\"?><soap:Envelope><soap:Body><GetDeviceInformation/></soap:Body></soap:Envelope>"
+        ));
+        assert!(is_public_endpoint("<tds:GetServices/>"));
+        assert!(is_public_endpoint("GetSystemDateAndTime"));
+
+        // Test endpoints that require authentication
+        assert!(!is_public_endpoint("<GetProfiles/>"));
+        assert!(!is_public_endpoint("GetStreamUri"));
+        assert!(!is_public_endpoint(
+            "<soap:Body><GetSnapshotUri/></soap:Body>"
+        ));
+    }
+
+    #[test]
+    fn test_validate_basic_auth() {
+        // Valid Basic Auth: admin:onvif-rust encoded as base64
+        let valid_auth = "Basic YWRtaW46b252aWYtcnVzdA==";
+        assert!(validate_basic_auth(valid_auth, "admin", "onvif-rust"));
+
+        // Invalid credentials
+        assert!(!validate_basic_auth(valid_auth, "admin", "wrong-password"));
+        assert!(!validate_basic_auth(valid_auth, "wrong-user", "onvif-rust"));
+
+        // Malformed auth header
+        assert!(!validate_basic_auth(
+            "Basic invalid-base64",
+            "admin",
+            "onvif-rust"
+        ));
+        assert!(!validate_basic_auth("Bearer token", "admin", "onvif-rust"));
+    }
+
+    #[test]
+    fn test_extract_authorization_header() {
+        let request_with_basic = "POST /onvif/device_service HTTP/1.1\r\nAuthorization: Basic YWRtaW46b252aWYtcnVzdA==\r\nContent-Type: application/soap+xml\r\n\r\n";
+        assert_eq!(
+            extract_authorization_header(request_with_basic),
+            Some("Basic YWRtaW46b252aWYtcnVzdA==".to_string())
+        );
+
+        let request_with_digest = "POST /onvif/media_service HTTP/1.1\r\nAuthorization: Digest username=\"admin\", realm=\"ONVIF\"\r\n\r\n";
+        assert_eq!(
+            extract_authorization_header(request_with_digest),
+            Some("Digest username=\"admin\", realm=\"ONVIF\"".to_string())
+        );
+
+        let request_without_auth =
+            "POST /onvif/device_service HTTP/1.1\r\nContent-Type: application/soap+xml\r\n\r\n";
+        assert_eq!(extract_authorization_header(request_without_auth), None);
+    }
+
+    #[test]
+    fn test_validate_ws_security_auth() {
+        // Test PasswordText authentication
+        let ws_security_request = r#"
+            <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+                <soap:Header>
+                    <Security xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+                        <UsernameToken>
+                            <Username>admin</Username>
+                            <Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">onvif-rust</Password>
+                        </UsernameToken>
+                    </Security>
+                </soap:Header>
+                <soap:Body><GetProfiles/></soap:Body>
+            </soap:Envelope>
+        "#;
+
+        assert!(validate_ws_security_auth(
+            ws_security_request,
+            "admin",
+            "onvif-rust"
+        ));
+        assert!(!validate_ws_security_auth(
+            ws_security_request,
+            "admin",
+            "wrong-password"
+        ));
+        assert!(!validate_ws_security_auth(
+            ws_security_request,
+            "wrong-user",
+            "onvif-rust"
+        ));
+
+        // Test simple password element without type
+        let simple_ws_security = r#"
+            <soap:Envelope>
+                <soap:Header>
+                    <UsernameToken>
+                        <Username>admin</Username>
+                        <Password>onvif-rust</Password>
+                    </UsernameToken>
+                </soap:Header>
+                <soap:Body><GetProfiles/></soap:Body>
+            </soap:Envelope>
+        "#;
+
+        assert!(validate_ws_security_auth(
+            simple_ws_security,
+            "admin",
+            "onvif-rust"
+        ));
+        assert!(!validate_ws_security_auth(
+            simple_ws_security,
+            "admin",
+            "wrong"
+        ));
+    }
+
+    #[test]
+    fn test_detect_unsupported_onvif_endpoint() {
+        // Test known unsupported endpoints
+        let ptz_request = r#"
+            <soap:Envelope>
+                <soap:Body><GetPresets/></soap:Body>
+            </soap:Envelope>
+        "#;
+
+        let result = detect_unsupported_onvif_endpoint(ptz_request);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("GetPresets"));
+
+        // Test supported endpoint (should return None)
+        let supported_request = r#"
+            <soap:Envelope>
+                <soap:Body><GetCapabilities/></soap:Body>
+            </soap:Envelope>
+        "#;
+
+        assert!(detect_unsupported_onvif_endpoint(supported_request).is_none());
+
+        // Test non-ONVIF request
+        let non_onvif_request = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(detect_unsupported_onvif_endpoint(non_onvif_request).is_none());
+    }
+
+    #[test]
+    fn test_config_from_env() {
+        // Save original environment
+        let original_vars: Vec<_> = [
+            "RTSP_INPUT",
+            "ONVIF_PORT",
+            "DEVICE_NAME",
+            "ONVIF_USERNAME",
+            "ONVIF_PASSWORD",
+        ]
+        .iter()
+        .map(|var| (var, std::env::var(var).ok()))
+        .collect();
+
+        // Set test environment variables
+        unsafe {
+            std::env::set_var("RTSP_INPUT", "rtsp://test:8554/stream");
+            std::env::set_var("ONVIF_PORT", "8080");
+            std::env::set_var("DEVICE_NAME", "Test-Camera");
+            std::env::set_var("ONVIF_USERNAME", "testuser");
+            std::env::set_var("ONVIF_PASSWORD", "testpass");
+        }
+
+        // Test successful config creation
+        let config = Config::from_env();
+        assert!(config.is_ok());
+
+        let config = config.unwrap();
+        assert_eq!(config.rtsp_input, "rtsp://test:8554/stream");
+        assert_eq!(config.onvif_port, "8080");
+        assert_eq!(config.device_name, "Test-Camera");
+        assert_eq!(config.onvif_username, "testuser");
+        assert_eq!(config.onvif_password, "testpass");
+
+        // Test invalid port
+        unsafe {
+            std::env::set_var("ONVIF_PORT", "invalid-port");
+        }
+        let config = Config::from_env();
+        assert!(config.is_err());
+
+        // Test missing environment variable
+        unsafe {
+            std::env::remove_var("RTSP_INPUT");
+        }
+        let config = Config::from_env();
+        assert!(config.is_err());
+
+        // Restore original environment
+        unsafe {
+            for (var, value) in original_vars {
+                match value {
+                    Some(val) => std::env::set_var(var, val),
+                    None => std::env::remove_var(var),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_authentication_integration() {
+        let username = "admin";
+        let password = "onvif-rust";
+
+        // Test public endpoint (no auth required)
+        let public_request = r#"POST /onvif/device_service HTTP/1.1
+Content-Type: application/soap+xml
+
+<soap:Envelope><soap:Body><GetCapabilities/></soap:Body></soap:Envelope>"#;
+
+        assert!(is_public_endpoint(public_request));
+
+        // Test protected endpoint with valid Basic Auth (proper HTTP format)
+        let protected_request_with_auth = "POST /onvif/media_service HTTP/1.1\r\nAuthorization: Basic YWRtaW46b252aWYtcnVzdA==\r\nContent-Type: application/soap+xml\r\n\r\n<soap:Envelope><soap:Body><GetProfiles/></soap:Body></soap:Envelope>";
+
+        assert!(!is_public_endpoint(protected_request_with_auth));
+        assert!(is_authenticated(
+            protected_request_with_auth,
+            username,
+            password
+        ));
+
+        // Test protected endpoint without auth
+        let protected_request_no_auth = r#"POST /onvif/media_service HTTP/1.1
+Content-Type: application/soap+xml
+
+<soap:Envelope><soap:Body><GetProfiles/></soap:Body></soap:Envelope>"#;
+
+        assert!(!is_public_endpoint(protected_request_no_auth));
+        assert!(!is_authenticated(
+            protected_request_no_auth,
+            username,
+            password
+        ));
+    }
+}
