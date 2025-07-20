@@ -10,6 +10,28 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 <soap:Body>
 <tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
 <tds:Capabilities>
+<tds:Media>
+<tds:Profile>
+<tds:Name>Profile1</tds:Name>
+<tds:VideoEncoder>
+<tds:Resolution>
+<tds:Width>640</tds:Width>
+<tds:Height>360</tds:Height>
+</tds:Resolution>
+<tds:Bitrate>1000</tds:Bitrate>
+<tds:FrameRate>30</tds:FrameRate>
+</tds:VideoEncoder>
+</tds:Profile>
+</tds:Media>
+</tds:Capabilities>
+</tds:GetCapabilitiesResponse>
+</soap:Body>
+</soap:Envelope>
+<tt:GovLength>15</tt:GovLength>
+<tt:H264Profile>Main</tt:H264Profile>
+<tt:Level>4.1</tt:Level>
+</tt:H264>s="http://www.onvif.org/ver10/device/wsdl">
+<tds:Capabilities>
 <tt:Device xmlns:tt="http://www.onvif.org/ver10/schema">
 <tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
 <tt:Network>
@@ -159,12 +181,12 @@ pub fn get_profiles_response() -> String {
 </tt:Resolution>
 <tt:Quality>4</tt:Quality>
 <tt:RateControl>
-<tt:FrameRateLimit>30</tt:FrameRateLimit>
+<tt:FrameRateLimit>15</tt:FrameRateLimit>
 <tt:EncodingInterval>1</tt:EncodingInterval>
 <tt:BitrateLimit>1500</tt:BitrateLimit>
 </tt:RateControl>
 <tt:H264>
-<tt:GovLength>30</tt:GovLength>
+<tt:GovLength>15</tt:GovLength>
 <tt:H264Profile>Main</tt:H264Profile>
 <tt:Level>4.1</tt:Level>
 </tt:H264>
@@ -309,10 +331,10 @@ pub fn get_video_sources_response() -> String {
 <soap:Body>
 <trt:GetVideoSourcesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:VideoSources token="VideoSource_1">
-<tt:Framerate xmlns:tt="http://www.onvif.org/ver10/schema">30</tt:Framerate>
+<tt:Framerate xmlns:tt="http://www.onvif.org/ver10/schema">15</tt:Framerate>
 <tt:Resolution xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:Width>1920</tt:Width>
-<tt:Height>1080</tt:Height>
+<tt:Width>960</tt:Width>
+<tt:Height>540</tt:Height>
 </tt:Resolution>
 </trt:VideoSources>
 </trt:GetVideoSourcesResponse>
