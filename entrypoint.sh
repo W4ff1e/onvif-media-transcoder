@@ -1,7 +1,7 @@
 #!/bin/sh
 
 echo "========================================"
-echo "FFmpeg ONVIF Camera Emulator Starting"
+echo "ONVIF Media Transcoder Starting"
 echo "========================================"
 
 # Validation function - all environment variables should be set in Dockerfile
@@ -324,15 +324,15 @@ echo "INFO: WS-Discovery implemented in Rust (integrated with ONVIF service)"
 echo "      ONVIF service will be available at: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
 
 # Verify the Rust binary exists
-if [[ ! -f "/usr/local/bin/ffmpeg-onvif-emulator" ]]; then
-    echo "ERROR: Rust binary not found at /usr/local/bin/ffmpeg-onvif-emulator"
+if [[ ! -f "/usr/local/bin/onvif-media-transcoder" ]]; then
+    echo "ERROR: Rust binary not found at /usr/local/bin/onvif-media-transcoder"
     dump_ffmpeg_logs
     dump_mediamtx_logs
     kill $FFMPEG_ENCODER_PID $MEDIAMTX_PID $FFMPEG_LOG_MANAGER_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
 
-/usr/local/bin/ffmpeg-onvif-emulator &
+/usr/local/bin/onvif-media-transcoder &
 ONVIF_SERVICE_PID=$!
 if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
     echo "ERROR: Failed to start ONVIF service"
@@ -344,7 +344,7 @@ fi
 echo "ONVIF service started with PID: $ONVIF_SERVICE_PID"
 
 echo "========================================"
-echo "ONVIF Camera Emulator is ready!"
+echo "ONVIF Media Transcoder is ready!"
 echo "Container IP: ${CONTAINER_IP}"
 echo "Device discovery: Enabled via native Rust WS-Discovery on UDP port 3702"
 echo "RTSP Stream: ${RTSP_OUTPUT_URL}"

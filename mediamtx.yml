@@ -1,4 +1,4 @@
-# MediaMTX minimal configuration for ONVIF Camera Emulator
+# MediaMTX minimal configuration for ONVIF Media Transcoder
 
 # Logging
 logLevel: info

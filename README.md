@@ -1,4 +1,4 @@
-# FFmpeg ONVIF Camera Emulator
+# ONVIF Media Transcoder
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
@@ -7,11 +7,11 @@
 
 ## Overview
 
-**FFmpeg ONVIF Camera Emulator** is a Docker-based solution that converts any input stream (HLS, MP4, RTSP, etc.) into a fully ONVIF-compatible camera device. It provides automatic network discovery, standardized media profiles, and authentication-protected endpoints for seamless integration with ONVIF clients.
+**ONVIF Media Transcoder** is a Docker-based solution that converts any input stream (HLS, MP4, RTSP, etc.) into a fully ONVIF-compatible camera device. It provides automatic network discovery, standardized media profiles, and authentication-protected endpoints for seamless integration with ONVIF clients.
 
 ## Table of Contents
 
-- [FFmpeg ONVIF Camera Emulator](#ffmpeg-onvif-camera-emulator)
+- [ONVIF Media Transcoder](#onvif-media-transcoder)
   - [Overview](#overview)
   - [Table of Contents](#table-of-contents)
   - [Features](#features)
@@ -54,10 +54,10 @@
 
 ```bash
 # Build the image
-docker build -t ffmpeg-onvif-emulator .
+docker build -t onvif-media-transcoder .
 
 # Run with default demo stream
-docker run --rm -p 8080:8080 -p 8554:8554 -p 3702:3702/udp ffmpeg-onvif-emulator
+docker run --rm -p 8080:8080 -p 8554:8554 -p 3702:3702/udp onvif-media-transcoder
 
 # Run with custom stream and credentials
 docker run --rm -p 8080:8080 -p 8554:8554 -p 3702:3702/udp \
@@ -65,26 +65,26 @@ docker run --rm -p 8080:8080 -p 8554:8554 -p 3702:3702/udp \
   -e DEVICE_NAME="My-Custom-Camera" \
   -e ONVIF_USERNAME="myuser" \
   -e ONVIF_PASSWORD="mypassword" \
-  ffmpeg-onvif-emulator
+  onvif-media-transcoder
 ```
 
 ### Environment Variables
 
-| Variable           | Default                 | Description                   |
-| ------------------ | ----------------------- | ----------------------------- |
-| `INPUT_URL`        | Demo HLS stream         | Source video stream URL       |
-| `RTSP_OUTPUT_PORT` | `8554`                  | RTSP server port              |
-| `ONVIF_PORT`       | `8080`                  | ONVIF web service port        |
-| `DEVICE_NAME`      | `FFmpeg-ONVIF-Emulator` | Camera device name            |
-| `RTSP_PATH`        | `/stream`               | RTSP stream path              |
-| `ONVIF_USERNAME`   | `admin`                 | ONVIF authentication username |
-| `ONVIF_PASSWORD`   | `onvif-rust`            | ONVIF authentication password |
+| Variable           | Default                  | Description                   |
+| ------------------ | ------------------------ | ----------------------------- |
+| `INPUT_URL`        | Demo HLS stream          | Source video stream URL       |
+| `RTSP_OUTPUT_PORT` | `8554`                   | RTSP server port              |
+| `ONVIF_PORT`       | `8080`                   | ONVIF web service port        |
+| `DEVICE_NAME`      | `ONVIF-Media-Transcoder` | Camera device name            |
+| `RTSP_PATH`        | `/stream`                | RTSP stream path              |
+| `ONVIF_USERNAME`   | `admin`                  | ONVIF authentication username |
+| `ONVIF_PASSWORD`   | `onvif-rust`             | ONVIF authentication password |
 
-**Note**: The emulator automatically detects the container IP and configures all services accordingly.
+**Note**: The transcoder automatically detects the container IP and configures all services accordingly.
 
 ## Architecture
 
-The emulator consists of four integrated components:
+The transcoder consists of four integrated components:
 
 1. **MediaMTX RTSP Server**: Professional RTSP server for reliable stream delivery
 2. **FFmpeg Transcoder**: Real-time stream conversion with optimized encoding
@@ -167,11 +167,11 @@ ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name -of csv=p=0
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/ffmpeg-onvif-emulator.git
-cd ffmpeg-onvif-emulator
+git clone https://github.com/W4ff1e/onvif-media-transcoder.git
+cd onvif-media-transcoder
 
 # Build with Docker
-docker build -t ffmpeg-onvif-emulator .
+docker build -t onvif-media-transcoder .
 
 # Or build Rust components locally
 cargo build --release
@@ -214,7 +214,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [@W4ff1e](https://github.com/W4ff1e) - Initial work and maintenance
 - [GitHub Copilot](https://github.com/features/copilot) - Pair programming and code assistance
-
 
 ---
 

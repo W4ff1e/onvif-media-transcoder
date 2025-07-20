@@ -11,7 +11,7 @@ use onvif_responses::*;
 use ws_discovery::{DeviceInfo, WSDiscoveryServer, get_default_interface_ip};
 
 fn main() {
-    println!("Starting ONVIF Camera Emulator...");
+    println!("Starting ONVIF Media Transcoder...");
 
     // Strict configuration - no defaults, expect environment variables to be set
     let rtsp_input =
@@ -49,9 +49,9 @@ fn main() {
     let ws_discovery_device_info = DeviceInfo {
         endpoint_reference: format!("urn:uuid:{}", device_uuid),
         types: "tdn:NetworkVideoTransmitter".to_string(),
-        scopes: "onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/FFmpeg-ONVIF-Emulator".to_string(),
+        scopes: "onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/ONVIF-Media-Transcoder".to_string(),
         xaddrs: format!("http://{}:{}/onvif/device_service", container_ip, onvif_port),
-        manufacturer: "FFmpeg Solutions".to_string(),
+        manufacturer: "ONVIF Media Solutions".to_string(),
         model_name: device_name.clone(),
         friendly_name: device_name.clone(),
         firmware_version: "1.0.0".to_string(),

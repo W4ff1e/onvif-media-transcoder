@@ -45,7 +45,7 @@
             "args": [
                 "build",
                 "-t",
-                "ffmpeg-onvif-emulator",
+                "onvif-media-transcoder",
                 "."
             ],
             "group": "build",
@@ -70,7 +70,7 @@
                 "8554:8554",
                 "-p",
                 "3702:3702/udp",
-                "ffmpeg-onvif-emulator"
+                "onvif-media-transcoder"
             ],
             "group": "test",
             "presentation": {
@@ -101,7 +101,7 @@
                 "8554:8554",
                 "-p",
                 "3702:3702/udp",
-                "ffmpeg-onvif-emulator"
+                "onvif-media-transcoder"
             ],
             "group": "test",
             "presentation": {
@@ -137,7 +137,7 @@
             "command": "docker",
             "args": [
                 "stop",
-                "$(docker ps -q --filter ancestor=ffmpeg-onvif-emulator)"
+                "$(docker ps -q --filter ancestor=onvif-media-transcoder)"
             ],
             "group": "build",
             "presentation": {

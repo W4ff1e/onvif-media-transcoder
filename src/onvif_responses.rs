@@ -151,11 +151,11 @@ pub fn get_device_info_response(device_name: &str) -> String {
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
 <soap:Body>
 <tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-<tds:Manufacturer>FFmpeg Solutions</tds:Manufacturer>
+<tds:Manufacturer>ONVIF Media Solutions</tds:Manufacturer>
 <tds:Model>{}</tds:Model>
 <tds:FirmwareVersion>1.0.0</tds:FirmwareVersion>
 <tds:SerialNumber>EMU-{}</tds:SerialNumber>
-<tds:HardwareId>ffmpeg-onvif-emulator</tds:HardwareId>
+<tds:HardwareId>onvif-media-transcoder</tds:HardwareId>
 </tds:GetDeviceInformationResponse>
 </soap:Body>
 </soap:Envelope>"#,

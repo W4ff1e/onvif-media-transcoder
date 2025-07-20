@@ -1,5 +1,5 @@
 [package]
-name = "ffmpeg-onvif-emulator"
+name = "onvif-media-transcoder"
 version = "0.1.0"
 edition = "2024"
 
