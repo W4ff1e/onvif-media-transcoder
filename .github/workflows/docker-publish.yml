@@ -53,14 +53,16 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          # Set latest tag for releases
-          type=raw,value=latest,enable={{is_default_branch}}
+          # Set unstable tag for main branch commits (non-release)
+          type=raw,value=unstable,enable={{is_default_branch}}
+          # Set latest tag for releases only
+          type=raw,value=latest,enable={{is_default_branch}},priority=1000
           # Set semver tags for releases
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=semver,pattern={{major}}
-          # Set unstable tag for main branch commits (non-release)
-          type=raw,value=unstable,enable={{is_default_branch}}
+        flavor: |
+          latest=false
         labels: |
           org.opencontainers.image.title=ONVIF Media Transcoder
           org.opencontainers.image.description=Docker-based ONVIF-compatible media transcoder with WS-Discovery
