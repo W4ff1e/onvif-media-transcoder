@@ -68,9 +68,11 @@ jobs:
           
           - This project contains AI-generated code and should be thoroughly tested before production use
           - For WS-Discovery functionality, use `--network host` when running with Docker
-          - Default credentials are `admin` / `onvif-rust` (configurable via environment variables)
+          - **SECURITY WARNING**: Change default credentials (`admin`/`onvif-rust`) before production use via `ONVIF_USERNAME` and `ONVIF_PASSWORD` environment variables
           
           See the commit history for detailed changes in this release.
+          
+          **Full Changelog**: https://github.com/W4ff1e/onvif-media-transcoder/commits/${{ github.event.inputs.version }}
         draft: ${{ github.event.inputs.draft }}
         prerelease: ${{ github.event.inputs.prerelease }}
         target_commitish: ${{ github.sha }}
