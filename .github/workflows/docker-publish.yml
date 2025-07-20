@@ -69,7 +69,7 @@ jobs:
   build-release:
     name: Build and Push Release
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: github.event_name == 'release'
     permissions:
       contents: read
       packages: write
