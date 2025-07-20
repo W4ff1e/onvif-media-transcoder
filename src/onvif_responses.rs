@@ -1,7 +1,7 @@
 // ONVIF Response Templates
 // This module contains all the hardcoded ONVIF SOAP responses
 
-use chrono::{Datelike, Timelike, Utc};
+use chrono::{Datelike, Timelike};
 
 pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String {
     format!(
@@ -11,7 +11,7 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 <tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
 <tds:Capabilities>
 <tt:Device xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:XAddr>http://{}:{}/onvif/device_service</tt:XAddr>
+<tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
 <tt:Network>
 <tt:IPFilter>false</tt:IPFilter>
 <tt:ZeroConfiguration>false</tt:ZeroConfiguration>
@@ -46,7 +46,7 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 </tt:Security>
 </tt:Device>
 <tt:Media xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:XAddr>http://{}:{}/onvif/device_service</tt:XAddr>
+<tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
 <tt:StreamingCapabilities>
 <tt:RTPMulticast>false</tt:RTPMulticast>
 <tt:RTP_TCP>true</tt:RTP_TCP>
@@ -54,13 +54,12 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 </tt:StreamingCapabilities>
 </tt:Media>
 <tt:PTZ xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:XAddr>http://{}:{}/onvif/device_service</tt:XAddr>
+<tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
 </tt:PTZ>
 </tds:Capabilities>
 </tds:GetCapabilitiesResponse>
 </soap:Body>
-</soap:Envelope>"#,
-        container_ip, onvif_port, container_ip, onvif_port, container_ip, onvif_port
+</soap:Envelope>"#
     )
 }
 
@@ -72,7 +71,7 @@ pub fn get_services_response(container_ip: &str, onvif_port: &str) -> String {
 <tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
 <tds:Service>
 <tds:Namespace>http://www.onvif.org/ver10/device/wsdl</tds:Namespace>
-<tds:XAddr>http://{}:{}/onvif/device_service</tds:XAddr>
+<tds:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tds:XAddr>
 <tds:Capabilities>
 <tds:Network>
 <tds:IPFilter>false</tds:IPFilter>
@@ -114,7 +113,7 @@ pub fn get_services_response(container_ip: &str, onvif_port: &str) -> String {
 </tds:Service>
 <tds:Service>
 <tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace>
-<tds:XAddr>http://{}:{}/onvif/device_service</tds:XAddr>
+<tds:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tds:XAddr>
 <tds:Capabilities>
 <tds:StreamingCapabilities>
 <tds:RTPMulticast>false</tds:RTPMulticast>
@@ -129,8 +128,7 @@ pub fn get_services_response(container_ip: &str, onvif_port: &str) -> String {
 </tds:Service>
 </tds:GetServicesResponse>
 </soap:Body>
-</soap:Envelope>"#,
-        container_ip, onvif_port, container_ip, onvif_port
+</soap:Envelope>"#
     )
 }
 
@@ -227,12 +225,11 @@ pub fn get_stream_uri_response(rtsp_stream: &str) -> String {
 <soap:Body>
 <trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:MediaUri>
-<tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">{}</tt:Uri>
+<tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">{rtsp_stream}</tt:Uri>
 </trt:MediaUri>
 </trt:GetStreamUriResponse>
 </soap:Body>
-</soap:Envelope>"#,
-        rtsp_stream
+</soap:Envelope>"#
     )
 }
 
@@ -416,12 +413,11 @@ pub fn get_snapshot_uri_response(container_ip: &str, onvif_port: &str) -> String
 <soap:Body>
 <trt:GetSnapshotUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:MediaUri>
-<tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">http://{}:{}/snapshot.jpg</tt:Uri>
+<tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">http://{container_ip}:{onvif_port}/snapshot.jpg</tt:Uri>
 </trt:MediaUri>
 </trt:GetSnapshotUriResponse>
 </soap:Body>
-</soap:Envelope>"#,
-        container_ip, onvif_port
+</soap:Envelope>"#
     )
 }
 
@@ -475,11 +471,11 @@ pub fn get_unsupported_endpoint_response(endpoint: &str) -> String {
 <soap:Value>soap:Receiver</soap:Value>
 </soap:Code>
 <soap:Reason>
-<soap:Text xml:lang="en">The requested operation '{}' is not supported by this ONVIF Media Transcoder implementation.</soap:Text>
+<soap:Text xml:lang="en">The requested operation '{endpoint}' is not supported by this ONVIF Media Transcoder implementation.</soap:Text>
 </soap:Reason>
 <soap:Detail>
 <ter:Action xmlns:ter="http://www.onvif.org/ver10/error">
-<ter:Operation>{}</ter:Operation>
+<ter:Operation>{endpoint}</ter:Operation>
 <ter:Category>Receiver</ter:Category>
 <ter:Reason>OperationNotSupported</ter:Reason>
 <ter:Detail>This ONVIF Media Transcoder supports basic streaming functionality. The requested operation is not implemented.</ter:Detail>
@@ -487,7 +483,6 @@ pub fn get_unsupported_endpoint_response(endpoint: &str) -> String {
 </soap:Detail>
 </soap:Fault>
 </soap:Body>
-</soap:Envelope>"#,
-        endpoint, endpoint
+</soap:Envelope>"#
     )
 }
