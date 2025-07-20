@@ -1,4 +1,4 @@
-# MediaMTX minimal configuration for ONVIF Media Transcoder
+# MediaMTX configuration optimized for WiFi streaming
 
 # Logging
 logLevel: info
@@ -6,6 +6,17 @@ logDestinations: [stdout]
 
 # RTSP server configuration
 rtspAddress: :RTSP_PORT_PLACEHOLDER
+
+# Network optimizations for WiFi
+writeQueueSize: 512
+udpMaxPayloadSize: 1472
+
+# RTSP-specific optimizations
+rtsp: true
+rtspEncryption: "no"
+rtspServerKey: ""
+rtspServerCert: ""
+rtspAuthMethods: ["basic"]
 
 # Stream path configuration
 paths:

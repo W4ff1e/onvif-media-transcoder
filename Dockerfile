@@ -45,7 +45,6 @@ COPY --from=builder /app/target/release/onvif-media-transcoder /usr/local/bin/
 
 # Set environment variables with default values
 ENV INPUT_URL="https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8"
-ENV OUTPUT_PORT="8554"
 ENV RTSP_OUTPUT_PORT="8554"
 ENV RTSP_PATH="/stream"
 ENV ONVIF_PORT="8080"
