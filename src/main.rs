@@ -455,7 +455,15 @@ fn handle_onvif_request(
     if requires_auth && !is_authenticated(&request, &config.onvif_username, &config.onvif_password)
     {
         println!("  Authentication required - sending 401 response");
-        send_auth_required_response(&mut stream)?;
+
+        // Check if this is a SOAP request that might benefit from WS-Security auth
+        if request.contains("soap:Envelope") || request.contains("<soap:") {
+            println!("  Detected SOAP request - sending WS-Security auth fault");
+            send_ws_security_auth_fault(&mut stream)?;
+        } else {
+            println!("  Sending standard HTTP auth challenge");
+            send_auth_required_response(&mut stream)?;
+        }
         return Ok(());
     } else if requires_auth {
         println!("  Authentication successful");
@@ -881,6 +889,13 @@ fn send_auth_required_response(stream: &mut TcpStream) -> Result<(), Box<dyn std
     stream
         .write_all(auth_response.as_bytes())
         .map_err(|e| format!("Failed to send auth required response: {e}").into())
+}
+
+fn send_ws_security_auth_fault(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+    let auth_fault = get_ws_security_auth_fault();
+    stream
+        .write_all(auth_fault.as_bytes())
+        .map_err(|e| format!("Failed to send WS-Security auth fault: {e}").into())
 }
 
 fn send_capabilities_response(

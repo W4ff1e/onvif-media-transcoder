@@ -2,6 +2,7 @@
 // This module contains all the hardcoded ONVIF SOAP responses
 
 use chrono::{Datelike, Timelike};
+use uuid;
 
 pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String {
     format!(
@@ -43,6 +44,10 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 <tt:SAMLToken>false</tt:SAMLToken>
 <tt:KerberosToken>false</tt:KerberosToken>
 <tt:RELToken>false</tt:RELToken>
+<tt:UsernameToken>true</tt:UsernameToken>
+<tt:HttpDigest>true</tt:HttpDigest>
+<tt:WSUsernameToken>true</tt:WSUsernameToken>
+<tt:WSSecurityDuration>5</tt:WSSecurityDuration>
 </tt:Security>
 </tt:Device>
 <tt:Media xmlns:tt="http://www.onvif.org/ver10/schema">
@@ -137,16 +142,16 @@ pub fn get_profiles_response() -> String {
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
 <soap:Body>
 <trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Profiles token="MainProfile" fixed="true">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">MainProfile</tt:Name>
-<tt:VideoSourceConfiguration token="VideoSourceConfig">
-<tt:Name>VideoSourceConfig</tt:Name>
+<trt:Profiles token="HQProfile" fixed="true">
+<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">HQProfile</tt:Name>
+<tt:VideoSourceConfiguration token="VideoSourceConfig_HQ">
+<tt:Name>VideoSourceConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:SourceToken>VideoSource_1</tt:SourceToken>
 <tt:Bounds x="0" y="0" width="1920" height="1080"/>
 </tt:VideoSourceConfiguration>
-<tt:VideoEncoderConfiguration token="VideoEncoderConfig">
-<tt:Name>VideoEncoderConfig</tt:Name>
+<tt:VideoEncoderConfiguration token="VideoEncoderConfig_HQ">
+<tt:Name>VideoEncoderConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:Encoding>H264</tt:Encoding>
 <tt:Resolution>
@@ -174,13 +179,73 @@ pub fn get_profiles_response() -> String {
 </tt:Multicast>
 <tt:SessionTimeout>PT60S</tt:SessionTimeout>
 </tt:VideoEncoderConfiguration>
-<tt:AudioSourceConfiguration token="AudioSourceConfig">
-<tt:Name>AudioSourceConfig</tt:Name>
+<tt:AudioSourceConfiguration token="AudioSourceConfig_HQ">
+<tt:Name>AudioSourceConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:SourceToken>AudioSource_1</tt:SourceToken>
 </tt:AudioSourceConfiguration>
-<tt:AudioEncoderConfiguration token="AudioEncoderConfig">
-<tt:Name>AudioEncoderConfig</tt:Name>
+<tt:AudioEncoderConfiguration token="AudioEncoderConfig_HQ">
+<tt:Name>AudioEncoderConfig_HQ</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:Encoding>AAC</tt:Encoding>
+<tt:Bitrate>128000</tt:Bitrate>
+<tt:SampleRate>48000</tt:SampleRate>
+<tt:Multicast>
+<tt:Address>
+<tt:Type>IPv4</tt:Type>
+<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
+</tt:Address>
+<tt:Port>0</tt:Port>
+<tt:TTL>1</tt:TTL>
+<tt:AutoStart>false</tt:AutoStart>
+</tt:Multicast>
+<tt:SessionTimeout>PT60S</tt:SessionTimeout>
+</tt:AudioEncoderConfiguration>
+</trt:Profiles>
+<trt:Profiles token="LQProfile" fixed="true">
+<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">LQProfile</tt:Name>
+<tt:VideoSourceConfiguration token="VideoSourceConfig_LQ">
+<tt:Name>VideoSourceConfig_LQ</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:SourceToken>VideoSource_1</tt:SourceToken>
+<tt:Bounds x="0" y="0" width="640" height="360"/>
+</tt:VideoSourceConfiguration>
+<tt:VideoEncoderConfiguration token="VideoEncoderConfig_LQ">
+<tt:Name>VideoEncoderConfig_LQ</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:Encoding>H264</tt:Encoding>
+<tt:Resolution>
+<tt:Width>640</tt:Width>
+<tt:Height>360</tt:Height>
+</tt:Resolution>
+<tt:Quality>3</tt:Quality>
+<tt:RateControl>
+<tt:FrameRateLimit>15</tt:FrameRateLimit>
+<tt:EncodingInterval>1</tt:EncodingInterval>
+<tt:BitrateLimit>1000</tt:BitrateLimit>
+</tt:RateControl>
+<tt:H264>
+<tt:GovLength>15</tt:GovLength>
+<tt:H264Profile>Baseline</tt:H264Profile>
+</tt:H264>
+<tt:Multicast>
+<tt:Address>
+<tt:Type>IPv4</tt:Type>
+<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
+</tt:Address>
+<tt:Port>0</tt:Port>
+<tt:TTL>1</tt:TTL>
+<tt:AutoStart>false</tt:AutoStart>
+</tt:Multicast>
+<tt:SessionTimeout>PT60S</tt:SessionTimeout>
+</tt:VideoEncoderConfiguration>
+<tt:AudioSourceConfiguration token="AudioSourceConfig_LQ">
+<tt:Name>AudioSourceConfig_LQ</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:SourceToken>AudioSource_1</tt:SourceToken>
+</tt:AudioSourceConfiguration>
+<tt:AudioEncoderConfiguration token="AudioEncoderConfig_LQ">
+<tt:Name>AudioEncoderConfig_LQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:Encoding>AAC</tt:Encoding>
 <tt:Bitrate>64000</tt:Bitrate>
@@ -196,26 +261,11 @@ pub fn get_profiles_response() -> String {
 </tt:Multicast>
 <tt:SessionTimeout>PT60S</tt:SessionTimeout>
 </tt:AudioEncoderConfiguration>
-<tt:PTZConfiguration token="PTZConfig">
-<tt:Name>PTZConfig</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:NodeToken>PTZNode_1</tt:NodeToken>
-<tt:DefaultAbsolutePantTiltPositionSpace>http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace</tt:DefaultAbsolutePantTiltPositionSpace>
-<tt:DefaultAbsoluteZoomPositionSpace>http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace</tt:DefaultAbsoluteZoomPositionSpace>
-<tt:DefaultRelativePanTiltTranslationSpace>http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace</tt:DefaultRelativePanTiltTranslationSpace>
-<tt:DefaultRelativeZoomTranslationSpace>http://www.onvif.org/ver10/tptz/ZoomSpaces/TranslationGenericSpace</tt:DefaultRelativeZoomTranslationSpace>
-<tt:DefaultContinuousPanTiltVelocitySpace>http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace</tt:DefaultContinuousPanTiltVelocitySpace>
-<tt:DefaultContinuousZoomVelocitySpace>http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace</tt:DefaultContinuousZoomVelocitySpace>
-<tt:DefaultPTZSpeed>
-<tt:PanTilt x="0.1" y="0.1" space="http://www.onvif.org/ver10/tptz/PanTiltSpaces/GenericSpeedSpace"/>
-<tt:Zoom x="0.1" space="http://www.onvif.org/ver10/tptz/ZoomSpaces/ZoomGenericSpeedSpace"/>
-</tt:DefaultPTZSpeed>
-<tt:DefaultPTZTimeout>PT5S</tt:DefaultPTZTimeout>
-</tt:PTZConfiguration>
 </trt:Profiles>
 </trt:GetProfilesResponse>
 </soap:Body>
-</soap:Envelope>"#.to_string()
+</soap:Envelope>"#
+        .to_string()
 }
 
 pub fn get_stream_uri_response(rtsp_stream: &str) -> String {
@@ -296,11 +346,17 @@ pub fn get_video_source_configurations_response() -> String {
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
 <soap:Body>
 <trt:GetVideoSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Configurations token="VideoSourceConfig">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig</tt:Name>
+<trt:Configurations token="VideoSourceConfig_HQ">
+<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:SourceToken>VideoSource_1</tt:SourceToken>
 <tt:Bounds x="0" y="0" width="1920" height="1080"/>
+</trt:Configurations>
+<trt:Configurations token="VideoSourceConfig_LQ">
+<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig_LQ</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:SourceToken>VideoSource_1</tt:SourceToken>
+<tt:Bounds x="0" y="0" width="640" height="360"/>
 </trt:Configurations>
 </trt:GetVideoSourceConfigurationsResponse>
 </soap:Body>
@@ -313,8 +369,8 @@ pub fn get_video_encoder_configurations_response() -> String {
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
 <soap:Body>
 <trt:GetVideoEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Configurations token="VideoEncoderConfig">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoEncoderConfig</tt:Name>
+<trt:Configurations token="VideoEncoderConfig_HQ">
+<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoEncoderConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:Encoding>H264</tt:Encoding>
 <tt:Resolution>
@@ -330,6 +386,35 @@ pub fn get_video_encoder_configurations_response() -> String {
 <tt:H264>
 <tt:GovLength>30</tt:GovLength>
 <tt:H264Profile>Main</tt:H264Profile>
+</tt:H264>
+<tt:Multicast>
+<tt:Address>
+<tt:Type>IPv4</tt:Type>
+<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
+</tt:Address>
+<tt:Port>0</tt:Port>
+<tt:TTL>1</tt:TTL>
+<tt:AutoStart>false</tt:AutoStart>
+</tt:Multicast>
+<tt:SessionTimeout>PT60S</tt:SessionTimeout>
+</trt:Configurations>
+<trt:Configurations token="VideoEncoderConfig_LQ">
+<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoEncoderConfig_LQ</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:Encoding>H264</tt:Encoding>
+<tt:Resolution>
+<tt:Width>640</tt:Width>
+<tt:Height>360</tt:Height>
+</tt:Resolution>
+<tt:Quality>3</tt:Quality>
+<tt:RateControl>
+<tt:FrameRateLimit>15</tt:FrameRateLimit>
+<tt:EncodingInterval>1</tt:EncodingInterval>
+<tt:BitrateLimit>1000</tt:BitrateLimit>
+</tt:RateControl>
+<tt:H264>
+<tt:GovLength>15</tt:GovLength>
+<tt:H264Profile>Baseline</tt:H264Profile>
 </tt:H264>
 <tt:Multicast>
 <tt:Address>
@@ -393,12 +478,59 @@ pub fn get_audio_encoder_configurations_response() -> String {
 }
 
 pub fn get_auth_required_response() -> String {
-    r#"HTTP/1.1 401 Unauthorized
-WWW-Authenticate: Basic realm="ONVIF Camera"
-WWW-Authenticate: Digest realm="ONVIF Camera", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", qop="auth"
-Content-Type: application/soap+xml
-Content-Length: 0
+    // Generate a fresh nonce for each authentication challenge
+    let nonce = uuid::Uuid::new_v4().to_string().replace('-', "");
 
+    format!(
+        r#"HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Digest realm="ONVIF Camera", nonce="{nonce}", qop="auth", stale=false
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 350
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+<soap:Body>
+<soap:Fault>
+<soap:Code>
+<soap:Value>soap:Sender</soap:Value>
+<soap:Subcode>
+<soap:Value>ter:NotAuthorized</soap:Value>
+</soap:Subcode>
+</soap:Code>
+<soap:Reason>
+<soap:Text xml:lang="en">Authentication required</soap:Text>
+</soap:Reason>
+</soap:Fault>
+</soap:Body>
+</soap:Envelope>
+"#
+    )
+}
+
+pub fn get_ws_security_auth_fault() -> String {
+    r#"HTTP/1.1 401 Unauthorized
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 546
+
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:ter="http://www.onvif.org/ver10/error">
+<soap:Body>
+<soap:Fault>
+<soap:Code>
+<soap:Value>soap:Sender</soap:Value>
+<soap:Subcode>
+<soap:Value>ter:NotAuthorized</soap:Value>
+</soap:Subcode>
+</soap:Code>
+<soap:Reason>
+<soap:Text xml:lang="en">Sender not Authorized</soap:Text>
+</soap:Reason>
+<soap:Detail>
+<soap:Text>WS-Security authentication required. Please provide UsernameToken with PasswordDigest or PasswordText.</soap:Text>
+</soap:Detail>
+</soap:Fault>
+</soap:Body>
+</soap:Envelope>
 "#.to_string()
 }
 
