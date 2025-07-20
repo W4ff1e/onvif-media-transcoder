@@ -1,0 +1,13 @@
+# MediaMTX minimal configuration for ONVIF Camera Emulator
+
+# Logging
+logLevel: info
+logDestinations: [stdout]
+
+# RTSP server configuration
+rtspAddress: :RTSP_PORT_PLACEHOLDER
+
+# Stream path configuration
+paths:
+  STREAM_PATH_PLACEHOLDER:
+    source: publisher

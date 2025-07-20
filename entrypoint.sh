@@ -119,24 +119,16 @@ echo "  ONVIF Port: ${ONVIF_PORT}"
 echo "  Device Name: ${DEVICE_NAME}"
 echo "  ONVIF Username: ${ONVIF_USERNAME}"
 echo "  ONVIF Password: [HIDDEN]"
-echo "----------------------------------------"
 
 # Export environment variables for Rust application
-export RTSP_INPUT="${RTSP_OUTPUT_URL}"
+export RTSP_INPUT="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 export ONVIF_PORT="${ONVIF_PORT}"
 export DEVICE_NAME="${DEVICE_NAME}"
 export ONVIF_USERNAME="${ONVIF_USERNAME}"
 export ONVIF_PASSWORD="${ONVIF_PASSWORD}"
 
-# Start WS-Discovery service for ONVIF device discovery
-echo "Starting ONVIF device discovery..."
-echo "Container IP: $CONTAINER_IP"
-echo "INFO: WS-Discovery implemented in Rust (integrated with ONVIF service)"
-echo "      ONVIF service is available at: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
-WSDD_PID=0
-
 # Function to manage FFmpeg logs with size capping
-manage_ffmpeg_log() {
+manage_ffmpeg_logs() {
     local log_file="/tmp/ffmpeg.log"
     local max_lines=1000
     local keep_head=500
@@ -164,8 +156,37 @@ manage_ffmpeg_log() {
     done
 }
 
-# Function to dump FFmpeg log on error
-dump_ffmpeg_log() {
+# Function to manage MediaMTX logs with size capping
+manage_mediamtx_logs() {
+    local log_file="/tmp/mediamtx.log"
+    local max_lines=1000
+    local keep_head=500
+    local keep_tail=500
+    
+    # Monitor log file size and truncate if needed
+    while true; do
+        sleep 30
+        if [[ -f "$log_file" ]]; then
+            local line_count=$(wc -l < "$log_file")
+            if [[ $line_count -gt $max_lines ]]; then
+                echo "$(date): MediaMTX log reached $line_count lines, truncating..." >> "$log_file"
+                
+                # Keep first 500 and last 500 lines
+                head -n $keep_head "$log_file" > "${log_file}.tmp"
+                echo "" >> "${log_file}.tmp"
+                echo "=== LOG TRUNCATED $(date) ===" >> "${log_file}.tmp"
+                echo "" >> "${log_file}.tmp"
+                tail -n $keep_tail "$log_file" >> "${log_file}.tmp"
+                mv "${log_file}.tmp" "$log_file"
+                
+                echo "$(date): MediaMTX log truncated, keeping first $keep_head and last $keep_tail lines" >> "$log_file"
+            fi
+        fi
+    done
+}
+
+# Function to dump FFmpeg logs on error
+dump_ffmpeg_logs() {
     local log_file="/tmp/ffmpeg.log"
     if [[ -f "$log_file" ]]; then
         echo "========================================" 
@@ -178,19 +199,64 @@ dump_ffmpeg_log() {
     fi
 }
 
-# Start ffmpeg to re-encode input stream to ONVIF-compatible RTSP
-echo "Starting FFmpeg RTSP server..."
-echo "Re-encoding: ${INPUT_URL} -> rtsp://0.0.0.0:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
+# Function to dump MediaMTX logs on error
+dump_mediamtx_logs() {
+    local log_file="/tmp/mediamtx.log"
+    if [[ -f "$log_file" ]]; then
+        echo "========================================" 
+        echo "MediaMTX Log (Last 50 lines):"
+        echo "========================================"
+        tail -n 50 "$log_file"
+        echo "========================================"
+    else
+        echo "No MediaMTX log file found"
+    fi
+}
 
-# Create log directory
+# Create dynamic MediaMTX configuration with correct RTSP path and port
+STREAM_NAME="${RTSP_PATH#/}"  # Remove leading slash
+if [[ -z "$STREAM_NAME" ]]; then
+    STREAM_NAME="stream"  # Default if path is just "/"
+fi
+
+# Update MediaMTX config with the correct stream path and port
+sed -e "s/STREAM_PATH_PLACEHOLDER/${STREAM_NAME}/g" \
+    -e "s/RTSP_PORT_PLACEHOLDER/${RTSP_OUTPUT_PORT}/g" \
+    /etc/mediamtx.yml > /tmp/mediamtx.yml
+
+# Start MediaMTX RTSP server
+echo "Starting MediaMTX RTSP server..."
+mediamtx /tmp/mediamtx.yml > /tmp/mediamtx.log 2>&1 &
+MEDIAMTX_PID=$!
+
+if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
+    echo "ERROR: Failed to start MediaMTX RTSP server"
+    echo "MediaMTX log output:"
+    cat /tmp/mediamtx.log
+    exit 1
+fi
+echo "MediaMTX started with PID: $MEDIAMTX_PID"
+
+# Wait for MediaMTX to start and begin listening
+echo "Waiting for MediaMTX to initialize..."
+sleep 3
+
+# Start MediaMTX log management in background
+manage_mediamtx_logs &
+MEDIAMTX_LOG_MANAGER_PID=$!
+
+# Start FFmpeg to re-encode input stream and push to MediaMTX RTSP server
+echo "Starting FFmpeg stream re-encoding..."
+
+# Create directories
 mkdir -p /tmp
 
-# Start log management in background
-manage_ffmpeg_log &
-LOG_MANAGER_PID=$!
+# Start log management in background for both FFmpeg and MediaMTX
+manage_ffmpeg_logs &
+FFMPEG_LOG_MANAGER_PID=$!
 
-# Start FFmpeg with RTSP server output using the simpler format
-# Listen on all interfaces (0.0.0.0) for the RTSP server
+# Start FFmpeg to push stream to MediaMTX
+# MediaMTX will handle the RTSP server functionality
 ffmpeg \
     -re \
     -i "${INPUT_URL}" \
@@ -212,128 +278,140 @@ ffmpeg \
     -ac 2 \
     -f rtsp \
     -rtsp_transport tcp \
-    "rtsp://0.0.0.0:${RTSP_OUTPUT_PORT}${RTSP_PATH}" \
+    "rtsp://localhost:${RTSP_OUTPUT_PORT}${RTSP_PATH}" \
     > /tmp/ffmpeg.log 2>&1 &
 
-FFMPEG_PID=$!
-if ! kill -0 $FFMPEG_PID 2>/dev/null; then
-    echo "ERROR: Failed to start FFmpeg RTSP server"
-    dump_ffmpeg_log
-    kill $WSDD_PID 2>/dev/null
+FFMPEG_ENCODER_PID=$!
+if ! kill -0 $FFMPEG_ENCODER_PID 2>/dev/null; then
+    echo "ERROR: Failed to start FFmpeg stream encoder"
+    dump_ffmpeg_logs
+    dump_mediamtx_logs
+    kill $MEDIAMTX_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
-echo "FFmpeg RTSP server started with PID: $FFMPEG_PID"
+echo "FFmpeg stream encoder started with PID: $FFMPEG_ENCODER_PID"
 
-# Wait for ffmpeg to establish the RTSP server
-echo "Waiting for FFmpeg to establish RTSP server..."
+# Wait for FFmpeg to connect to MediaMTX and start streaming
+echo "Waiting for FFmpeg to connect to MediaMTX..."
 sleep 8
 
 # Verify FFmpeg is still running
-if ! kill -0 $FFMPEG_PID 2>/dev/null; then
+if ! kill -0 $FFMPEG_ENCODER_PID 2>/dev/null; then
     echo "ERROR: FFmpeg process died during startup"
-    dump_ffmpeg_log
-    kill $WSDD_PID 2>/dev/null
+    dump_ffmpeg_logs
+    dump_mediamtx_logs
+    kill $MEDIAMTX_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
 
-# Test RTSP connection
-echo "Testing RTSP server connectivity..."
+# Test RTSP stream from MediaMTX
+echo "Testing RTSP stream from MediaMTX..."
 timeout 5 ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "${RTSP_OUTPUT_URL}" >/dev/null 2>&1
 if [[ $? -eq 0 ]]; then
-    echo "RTSP server test: SUCCESS"
+    echo "RTSP stream test: SUCCESS"
 else
-    echo "WARNING: RTSP server test failed, but continuing (stream may need more time to initialize)"
-    echo "FFmpeg may still be starting up..."
+    echo "WARNING: RTSP stream test failed, but continuing (stream may need more time to initialize)"
+    echo "FFmpeg may still be connecting to MediaMTX..."
+    echo "Check logs for details:"
+    echo "  - FFmpeg: /tmp/ffmpeg.log"
+    echo "  - MediaMTX: /tmp/mediamtx.log"
 fi
 
 # Start ONVIF web service (Rust application)
-echo "Starting ONVIF web service..."
-echo "ONVIF endpoints will be available at: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
+echo "Starting ONVIF device discovery..."
+echo "Container IP: ${CONTAINER_IP}"
+echo "INFO: WS-Discovery implemented in Rust (integrated with ONVIF service)"
+echo "      ONVIF service will be available at: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
 
 # Verify the Rust binary exists
 if [[ ! -f "/usr/local/bin/ffmpeg-onvif-emulator" ]]; then
     echo "ERROR: Rust binary not found at /usr/local/bin/ffmpeg-onvif-emulator"
-    dump_ffmpeg_log
-    kill $FFMPEG_PID $WSDD_PID $LOG_MANAGER_PID 2>/dev/null
+    dump_ffmpeg_logs
+    dump_mediamtx_logs
+    kill $FFMPEG_ENCODER_PID $MEDIAMTX_PID $FFMPEG_LOG_MANAGER_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
 
 /usr/local/bin/ffmpeg-onvif-emulator &
-ONVIF_PID=$!
-if ! kill -0 $ONVIF_PID 2>/dev/null; then
+ONVIF_SERVICE_PID=$!
+if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
     echo "ERROR: Failed to start ONVIF service"
-    dump_ffmpeg_log
-    kill $FFMPEG_PID $WSDD_PID $LOG_MANAGER_PID 2>/dev/null
+    dump_ffmpeg_logs
+    dump_mediamtx_logs
+    kill $FFMPEG_ENCODER_PID $MEDIAMTX_PID $FFMPEG_LOG_MANAGER_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
-echo "ONVIF service started with PID: $ONVIF_PID"
+echo "ONVIF service started with PID: $ONVIF_SERVICE_PID"
 
-echo "========================================"
-echo "Services Status:"
-echo "  WS-Discovery: Integrated with ONVIF service"
-echo "  FFmpeg (RTSP Server): PID $FFMPEG_PID"
-echo "  FFmpeg Log Manager: PID $LOG_MANAGER_PID"
-echo "  ONVIF Service (with WS-Discovery): PID $ONVIF_PID"
 echo "========================================"
 echo "ONVIF Camera Emulator is ready!"
 echo "Container IP: ${CONTAINER_IP}"
-echo "Device discovery: Enabled via native Rust WS-Discovery"
+echo "Device discovery: Enabled via native Rust WS-Discovery on UDP port 3702"
 echo "RTSP Stream: ${RTSP_OUTPUT_URL}"
 echo "ONVIF Endpoint: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
-echo "Note: Input stream is re-encoded to ONVIF-compatible RTSP"
-echo "FFmpeg logs: /tmp/ffmpeg.log (capped at 1000 lines)"
+echo "Note: Input stream is re-encoded and served via MediaMTX RTSP server"
+echo "Log files:"
+echo "  - FFmpeg: /tmp/ffmpeg.log (capped at 1000 lines)"
+echo "  - MediaMTX: /tmp/mediamtx.log (capped at 1000 lines)"
 echo "========================================"
 
 # Function to handle shutdown
-cleanup() {
+cleanup_services() {
     echo "Shutting down services..."
-    kill $ONVIF_PID 2>/dev/null
-    kill $FFMPEG_PID 2>/dev/null  
-    if [[ $WSDD_PID -ne 0 ]]; then
-        kill $WSDD_PID 2>/dev/null
-    fi
-    kill $LOG_MANAGER_PID 2>/dev/null
+    kill $ONVIF_SERVICE_PID 2>/dev/null
+    kill $FFMPEG_ENCODER_PID 2>/dev/null  
+    kill $MEDIAMTX_PID 2>/dev/null
+    kill $FFMPEG_LOG_MANAGER_PID 2>/dev/null
+    kill $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     wait
     echo "All services stopped."
 }
 
-trap cleanup SIGTERM SIGINT
+trap cleanup_services SIGTERM SIGINT
 
 # Monitor all processes
-monitor_processes() {
+monitor_all_services() {
     while true; do
         sleep 10
         
-        # Skip WSDD monitoring since it's disabled
-        if [[ $WSDD_PID -ne 0 ]] && ! kill -0 $WSDD_PID 2>/dev/null; then
-            echo "ERROR: WSDD process died (PID: $WSDD_PID)"
-            cleanup
+        if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
+            echo "ERROR: MediaMTX process died (PID: $MEDIAMTX_PID)"
+            dump_mediamtx_logs
+            cleanup_services
             exit 1
         fi
         
-        if ! kill -0 $FFMPEG_PID 2>/dev/null; then
-            echo "ERROR: FFmpeg process died (PID: $FFMPEG_PID)"
-            dump_ffmpeg_log
-            cleanup
+        if ! kill -0 $FFMPEG_ENCODER_PID 2>/dev/null; then
+            echo "ERROR: FFmpeg encoder process died (PID: $FFMPEG_ENCODER_PID)"
+            dump_ffmpeg_logs
+            cleanup_services
             exit 1
         fi
         
-        if ! kill -0 $ONVIF_PID 2>/dev/null; then
-            echo "ERROR: ONVIF service died (PID: $ONVIF_PID)"
-            cleanup
+        if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
+            echo "ERROR: ONVIF service died (PID: $ONVIF_SERVICE_PID)"
+            cleanup_services
             exit 1
         fi
         
-        if ! kill -0 $LOG_MANAGER_PID 2>/dev/null; then
-            echo "WARNING: Log manager died (PID: $LOG_MANAGER_PID), restarting..."
-            manage_ffmpeg_log &
-            LOG_MANAGER_PID=$!
+        if ! kill -0 $FFMPEG_LOG_MANAGER_PID 2>/dev/null; then
+            echo "WARNING: FFmpeg log manager died (PID: $FFMPEG_LOG_MANAGER_PID), restarting..."
+            manage_ffmpeg_logs &
+            FFMPEG_LOG_MANAGER_PID=$!
+            echo "FFmpeg log manager restarted with PID: $FFMPEG_LOG_MANAGER_PID"
+        fi
+        
+        if ! kill -0 $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null; then
+            echo "WARNING: MediaMTX log manager died (PID: $MEDIAMTX_LOG_MANAGER_PID), restarting..."
+            manage_mediamtx_logs &
+            MEDIAMTX_LOG_MANAGER_PID=$!
+            echo "MediaMTX log manager restarted with PID: $MEDIAMTX_LOG_MANAGER_PID"
         fi
     done
 }
 
 # Start monitoring in background
-monitor_processes &
+monitor_all_services &
 MONITOR_PID=$!
 
 # Wait for all background processes

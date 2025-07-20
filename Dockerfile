@@ -29,10 +29,15 @@ RUN cargo build --release
 FROM alpine:latest
 
 # Install runtime dependencies
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg curl
 
-# Copy entrypoint script
+# Download and install MediaMTX
+RUN curl -L https://github.com/bluenviron/mediamtx/releases/download/v1.13.0/mediamtx_v1.13.0_linux_amd64.tar.gz \
+    | tar -xz -C /usr/local/bin/ mediamtx
+
+# Copy configuration files
 COPY entrypoint.sh /entrypoint.sh
+COPY mediamtx.yml /etc/mediamtx.yml
 RUN chmod +x /entrypoint.sh
 
 # Copy the built binary from the builder stage
