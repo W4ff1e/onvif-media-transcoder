@@ -90,13 +90,13 @@ git clone https://github.com/W4ff1e/onvif-media-transcoder.git
 cd onvif-media-transcoder
 
 # Setup configuration (optional)
-./quick-start.sh setup
+./scripts/quick-start.sh setup
 
 # Build and run with one command
-./quick-start.sh run
+./scripts/quick-start.sh run
 
 # Or use Docker Compose (recommended)
-./quick-start.sh compose
+./scripts/quick-start.sh compose
 ```
 
 ### Docker Run
@@ -134,25 +134,26 @@ The project automatically publishes Docker images to Docker Hub with the followi
 
 - **`latest`** - Latest stable release
 - **`unstable`** - Latest commit to main branch (development builds)
-- **`v1.0.0`** - Specific version releases (semantic versioning)
-- **`main-<sha>`** - Specific commit builds for traceability
+- **`v0.10.0`** - Specific version releases (semantic versioning)
 
 ### Docker Compose
 
-For easier deployment and configuration, use the provided Docker Compose file:
+For easier deployment and configuration, use the provided Docker Compose examples:
 
 ```bash
 # Start with default configuration
-docker-compose up
+docker-compose -f examples/docker-compose.yml up
 
 # Start with custom environment file
-docker-compose --env-file .env.custom up
+cp examples/.env.example .env
+# Edit .env with your settings
+docker-compose -f examples/docker-compose.yml --env-file .env up
 
 # Start in background
-docker-compose up -d
+docker-compose -f examples/docker-compose.yml up -d
 
 # Stop services
-docker-compose down
+docker-compose -f examples/docker-compose.yml down
 ```
 
 ### Environment Variables
@@ -175,18 +176,38 @@ can be used as an alternative but may limit discovery functionality in some netw
 
 ## Architecture
 
-The transcoder consists of four integrated components:
+The transcoder consists of four integrated components working together to provide ONVIF-compatible streaming:
 
-1. **MediaMTX RTSP Server**: Professional RTSP server for reliable stream delivery
-2. **FFmpeg Transcoder**: Real-time stream conversion with optimized encoding
-3. **ONVIF Service**: Native Rust implementation of ONVIF SOAP endpoints
-4. **WS-Discovery**: Network discovery service for automatic device detection
+1. **ONVIF Service (Rust)**: Core ONVIF SOAP web service providing device management and media profiles
+2. **WS-Discovery Service (Rust)**: Network discovery service for automatic device detection via multicast
+3. **FFmpeg Transcoder**: Real-time stream conversion with H.264/AAC encoding optimization
+4. **MediaMTX RTSP Server**: Professional RTSP server for reliable stream delivery to ONVIF clients
 
 ```text
-Input Stream → FFmpeg → MediaMTX → RTSP Client
-                           ↓
-                    ONVIF Service ← WS-Discovery ← Network Discovery
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Input Stream  │───▶│   FFmpeg         │───▶│   MediaMTX      │
+│  (HLS/MP4/etc)  │    │   Transcoder     │    │   RTSP Server   │
+└─────────────────┘    └──────────────────┘    └─────────┬───────┘
+                                                         │
+                                                         ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  ONVIF Clients  │◀───│   ONVIF Service  │◀───│  RTSP Stream    │
+│                 │    │   (Port 8080)    │    │  (Port 8554)    │
+└─────────┬───────┘    └─────────┬────────┘    └─────────────────┘
+          │                      │
+          ▼                      ▲
+┌─────────────────┐    ┌──────────────────┐
+│  WS-Discovery   │───▶│  Device          │
+│  (Port 3702)    │    │  Discovery       │
+└─────────────────┘    └──────────────────┘
 ```
+
+**Data Flow:**
+
+- **Stream Processing**: Input streams are transcoded by FFmpeg and served via MediaMTX RTSP server
+- **Device Discovery**: WS-Discovery broadcasts device availability on the network
+- **ONVIF Integration**: ONVIF service provides standardized endpoints and references the RTSP stream
+- **Client Access**: ONVIF clients discover the device and access media streams through standard protocols
 
 ## ONVIF Compatibility
 
@@ -317,14 +338,15 @@ cargo build --release
 
 ### Configuration
 
-The project includes sample configuration files:
+The project includes sample configuration files in the `examples/` directory:
 
-- `docker-compose.yml` - Production-ready Docker Compose configuration
-- `.env.example` - Sample environment variables (copy to `.env` for customization)
+- `examples/docker-compose.yml` - Local development Docker Compose setup
+- `examples/docker-compose.hub.yml` - Published image Docker Compose setup  
+- `examples/.env.example` - Sample environment variables
 
 ```bash
 # Copy and customize environment file
-cp .env.example .env
+cp examples/.env.example .env
 # Edit .env with your preferred settings
 nano .env
 ```
@@ -381,14 +403,20 @@ git push origin v1.0.0
 Project structure:
 
 ```text
-├── src/
+├── src/                     # Rust source code
 │   ├── main.rs              # ONVIF service implementation
 │   ├── onvif_responses.rs   # SOAP response templates
 │   └── ws_discovery.rs      # WS-Discovery implementation
+├── examples/                # Example configurations
+│   ├── docker-compose.yml   # Local development setup
+│   ├── docker-compose.hub.yml # Published image setup
+│   └── .env.example         # Sample environment variables
+├── scripts/                 # Utility scripts
+│   ├── build.sh             # Docker build script
+│   ├── publish.sh           # Publishing script
+│   └── quick-start.sh       # Quick start script
+├── docs/                    # Documentation
 ├── Dockerfile               # Multi-stage build
-├── docker-compose.yml       # Docker Compose configuration
-├── .env.example            # Sample environment variables
-├── quick-start.sh          # Quick start script for common operations
 ├── entrypoint.sh           # Service orchestration
 ├── mediamtx.yml            # MediaMTX configuration
 └── .vscode/                # VS Code configuration
