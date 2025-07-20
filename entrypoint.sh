@@ -319,7 +319,7 @@ start_ffmpeg_with_retry() {
             -c:v libx264 \
             -preset medium \
             -tune zerolatency \
-            -profile:v constrained_baseline \
+            -profile:v baseline \
             -level 3.1 \
             -pix_fmt yuv420p \
             -vf "scale=960:540:flags=bilinear:force_original_aspect_ratio=disable" \
