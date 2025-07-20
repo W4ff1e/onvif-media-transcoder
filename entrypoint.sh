@@ -311,6 +311,7 @@ start_ffmpeg_with_retry() {
         
         # Start FFmpeg with UniFi Protect optimized settings
         # Input: 480x270, Output: Scaled appropriately, No audio
+        # Source is yuvj420p (full range), preserve color characteristics
         ffmpeg \
             -re \
             -rw_timeout 10000000 \
@@ -318,12 +319,9 @@ start_ffmpeg_with_retry() {
             -c:v libx264 \
             -preset medium \
             -tune zerolatency \
-            -profile:v main \
-            -level 4.1 \
+            -profile:v constrained_baseline \
+            -level 3.1 \
             -pix_fmt yuv420p \
-            -colorspace bt709 \
-            -color_primaries bt709 \
-            -color_trc bt709 \
             -vf "scale=960:540:flags=bilinear:force_original_aspect_ratio=disable" \
             -g 15 \
             -keyint_min 15 \

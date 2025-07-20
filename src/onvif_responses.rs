@@ -397,11 +397,6 @@ pub fn get_audio_source_configurations_response() -> String {
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
 <soap:Body>
 <trt:GetAudioSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Configurations token="AudioSourceConfig">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">AudioSourceConfig</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:SourceToken>AudioSource_1</tt:SourceToken>
-</trt:Configurations>
 </trt:GetAudioSourceConfigurationsResponse>
 </soap:Body>
 </soap:Envelope>"#
@@ -413,23 +408,6 @@ pub fn get_audio_encoder_configurations_response() -> String {
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
 <soap:Body>
 <trt:GetAudioEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Configurations token="AudioEncoderConfig">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">AudioEncoderConfig</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:Encoding>AAC</tt:Encoding>
-<tt:Bitrate>64000</tt:Bitrate>
-<tt:SampleRate>48000</tt:SampleRate>
-<tt:Multicast>
-<tt:Address>
-<tt:Type>IPv4</tt:Type>
-<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
-</tt:Address>
-<tt:Port>0</tt:Port>
-<tt:TTL>1</tt:TTL>
-<tt:AutoStart>false</tt:AutoStart>
-</tt:Multicast>
-<tt:SessionTimeout>PT60S</tt:SessionTimeout>
-</trt:Configurations>
 </trt:GetAudioEncoderConfigurationsResponse>
 </soap:Body>
 </soap:Envelope>"#
