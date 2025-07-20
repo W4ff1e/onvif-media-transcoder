@@ -4,12 +4,18 @@
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 [![ONVIF](https://img.shields.io/badge/ONVIF-compatible-green.svg)](https://www.onvif.org/)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![Security](https://img.shields.io/badge/security-policy-red.svg)](SECURITY.md)
 
-> ⚠️ **AI-Generated Code Warning**: This project contains code generated with the assistance of AI tools (GitHub Copilot). While thoroughly tested, this software is provided as-is and may not be suitable for production environments without proper review, testing, and validation by qualified developers. Use at your own risk.
+> ⚠️ **AI-Generated Code Warning**: This project contains code generated with the assistance of AI tools
+> (GitHub Copilot). While thoroughly tested, this software is provided as-is and may not be suitable for
+> production environments without proper review, testing, and validation by qualified developers.
+> Use at your own risk.
 
 ## Overview
 
-**ONVIF Media Transcoder** is a Docker-based solution that converts any input stream (HLS, MP4, RTSP, etc.) into a fully ONVIF-compatible camera device. It provides automatic network discovery, standardized media profiles, and authentication-protected endpoints for seamless integration with ONVIF clients.
+**ONVIF Media Transcoder** is a Docker-based solution that converts any input stream (HLS, MP4, RTSP, etc.)
+into a fully ONVIF-compatible camera device. It provides automatic network discovery, standardized media
+profiles, and authentication-protected endpoints for seamless integration with ONVIF clients.
 
 ## Table of Contents
 
@@ -45,6 +51,7 @@
     - [Creating Releases](#creating-releases)
     - [Development Workflow](#development-workflow)
   - [Contributing](#contributing)
+  - [Security](#security)
   - [License](#license)
   - [Authors](#authors)
 
@@ -155,7 +162,9 @@ docker-compose down
 
 **Note**: The transcoder automatically detects the container IP and configures all services accordingly.
 
-**Network Requirements**: For optimal WS-Discovery functionality, use `--network host` when running with Docker. This allows the multicast discovery protocol to work properly across network boundaries. Port mapping (`-p`) can be used as an alternative but may limit discovery functionality in some network configurations.
+**Network Requirements**: For optimal WS-Discovery functionality, use `--network host` when running with Docker.
+This allows the multicast discovery protocol to work properly across network boundaries. Port mapping (`-p`)
+can be used as an alternative but may limit discovery functionality in some network configurations.
 
 ## Architecture
 
@@ -382,7 +391,8 @@ Project structure:
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an
+issue first to discuss what you would like to change.
 
 **Code Quality Guidelines:**
 
@@ -394,11 +404,38 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 
 Please make sure to update tests as appropriate and follow the existing code style.
 
+## Security
+
+Security is a critical consideration for ONVIF Media Transcoder, especially given its network-exposed
+services and authentication mechanisms.
+
+### Important Security Notice
+
+⚠️ This project contains AI-generated code and should undergo thorough security review before production deployment.
+
+### Key Security Considerations
+
+- **Default Credentials**: Change the default `admin`/`onvif-rust` credentials in production
+- **Network Exposure**: Multiple services (ONVIF, RTSP, WS-Discovery) are exposed by default
+- **Authentication**: Supports multiple methods including WS-Security for enterprise compatibility
+- **Container Security**: Regular vulnerability scanning and security updates
+
+### Reporting Security Issues
+
+Please report security vulnerabilities responsibly:
+
+- Use [GitHub Security Advisories](https://github.com/W4ff1e/onvif-media-transcoder/security/advisories)
+- Email: [security@throud.org](mailto:security@throud.org)
+
+For detailed security information, deployment best practices, and vulnerability reporting procedures,
+see our [**Security Policy**](SECURITY.md).
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-**Disclaimer**: This software is provided "AS IS" without warranty of any kind. The use of AI-generated code components requires additional validation and testing before deployment in production environments.
+**Disclaimer**: This software is provided "AS IS" without warranty of any kind. The use of AI-generated
+code components requires additional validation and testing before deployment in production environments.
 
 ## Authors
 
