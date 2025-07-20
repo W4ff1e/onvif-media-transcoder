@@ -179,28 +179,6 @@ pub fn get_profiles_response() -> String {
 </tt:Multicast>
 <tt:SessionTimeout>PT60S</tt:SessionTimeout>
 </tt:VideoEncoderConfiguration>
-<tt:AudioSourceConfiguration token="AudioSourceConfig_HQ">
-<tt:Name>AudioSourceConfig_HQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:SourceToken>AudioSource_1</tt:SourceToken>
-</tt:AudioSourceConfiguration>
-<tt:AudioEncoderConfiguration token="AudioEncoderConfig_HQ">
-<tt:Name>AudioEncoderConfig_HQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:Encoding>AAC</tt:Encoding>
-<tt:Bitrate>128000</tt:Bitrate>
-<tt:SampleRate>48000</tt:SampleRate>
-<tt:Multicast>
-<tt:Address>
-<tt:Type>IPv4</tt:Type>
-<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
-</tt:Address>
-<tt:Port>0</tt:Port>
-<tt:TTL>1</tt:TTL>
-<tt:AutoStart>false</tt:AutoStart>
-</tt:Multicast>
-<tt:SessionTimeout>PT60S</tt:SessionTimeout>
-</tt:AudioEncoderConfiguration>
 </trt:Profiles>
 <trt:Profiles token="LQProfile" fixed="true">
 <tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">LQProfile</tt:Name>
@@ -240,28 +218,6 @@ pub fn get_profiles_response() -> String {
 </tt:Multicast>
 <tt:SessionTimeout>PT60S</tt:SessionTimeout>
 </tt:VideoEncoderConfiguration>
-<tt:AudioSourceConfiguration token="AudioSourceConfig_LQ">
-<tt:Name>AudioSourceConfig_LQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:SourceToken>AudioSource_1</tt:SourceToken>
-</tt:AudioSourceConfiguration>
-<tt:AudioEncoderConfiguration token="AudioEncoderConfig_LQ">
-<tt:Name>AudioEncoderConfig_LQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:Encoding>AAC</tt:Encoding>
-<tt:Bitrate>64000</tt:Bitrate>
-<tt:SampleRate>48000</tt:SampleRate>
-<tt:Multicast>
-<tt:Address>
-<tt:Type>IPv4</tt:Type>
-<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
-</tt:Address>
-<tt:Port>0</tt:Port>
-<tt:TTL>1</tt:TTL>
-<tt:AutoStart>false</tt:AutoStart>
-</tt:Multicast>
-<tt:SessionTimeout>PT60S</tt:SessionTimeout>
-</tt:AudioEncoderConfiguration>
 </trt:Profiles>
 </trt:GetProfilesResponse>
 </soap:Body>

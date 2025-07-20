@@ -324,7 +324,7 @@ start_ffmpeg_with_retry() {
             -colorspace bt709 \
             -color_primaries bt709 \
             -color_trc bt709 \
-            -vf "scale=960:540:flags=lanczos" \
+            -vf "scale=960:540:flags=bilinear:force_original_aspect_ratio=disable" \
             -g 15 \
             -keyint_min 15 \
             -sc_threshold 0 \
