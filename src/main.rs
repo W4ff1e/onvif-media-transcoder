@@ -1,5 +1,4 @@
 use base64::{Engine as _, engine::general_purpose};
-use chrono;
 use sha1::Digest;
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
@@ -30,22 +29,22 @@ impl Config {
         println!("Reading RTSP_INPUT environment variable...");
         let rtsp_input = std::env::var("RTSP_INPUT")
             .map_err(|_| "RTSP_INPUT environment variable must be set")?;
-        println!("RTSP_INPUT: {}", rtsp_input);
+        println!("RTSP_INPUT: {rtsp_input}");
 
         println!("Reading ONVIF_PORT environment variable...");
         let onvif_port = std::env::var("ONVIF_PORT")
             .map_err(|_| "ONVIF_PORT environment variable must be set")?;
-        println!("ONVIF_PORT: {}", onvif_port);
+        println!("ONVIF_PORT: {onvif_port}");
 
         println!("Reading DEVICE_NAME environment variable...");
         let device_name = std::env::var("DEVICE_NAME")
             .map_err(|_| "DEVICE_NAME environment variable must be set")?;
-        println!("DEVICE_NAME: {}", device_name);
+        println!("DEVICE_NAME: {device_name}");
 
         println!("Reading ONVIF_USERNAME environment variable...");
         let onvif_username = std::env::var("ONVIF_USERNAME")
             .map_err(|_| "ONVIF_USERNAME environment variable must be set")?;
-        println!("ONVIF_USERNAME: {}", onvif_username);
+        println!("ONVIF_USERNAME: {onvif_username}");
 
         println!("Reading ONVIF_PASSWORD environment variable...");
         let onvif_password = std::env::var("ONVIF_PASSWORD")
@@ -66,14 +65,11 @@ impl Config {
         println!("Detecting container IP...");
         let container_ip = match get_default_interface_ip() {
             Ok(ip) => {
-                println!("Container IP detected: {}", ip);
+                println!("Container IP detected: {ip}");
                 ip
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Could not determine container IP ({}), using localhost",
-                    e
-                );
+                eprintln!("Warning: Could not determine container IP ({e}), using localhost");
                 "127.0.0.1".to_string()
             }
         };
@@ -106,7 +102,7 @@ fn main() {
 
     // Set up panic hook for better crash reporting
     std::panic::set_hook(Box::new(|panic_info| {
-        eprintln!("PANIC in ONVIF service: {}", panic_info);
+        eprintln!("PANIC in ONVIF service: {panic_info}");
         if let Some(location) = panic_info.location() {
             eprintln!(
                 "  Location: {}:{}:{}",
@@ -128,7 +124,7 @@ fn main() {
             config
         }
         Err(e) => {
-            eprintln!("Configuration error: {}", e);
+            eprintln!("Configuration error: {e}");
             std::process::exit(1);
         }
     };
@@ -139,7 +135,7 @@ fn main() {
     // Start WS-Discovery server in a separate thread
     println!("Initializing WS-Discovery server...");
     if let Err(e) = start_ws_discovery_server(&config) {
-        eprintln!("Failed to start WS-Discovery server: {}", e);
+        eprintln!("Failed to start WS-Discovery server: {e}");
         println!(
             "Continuing without WS-Discovery (ONVIF service will still work for direct connections)"
         );
@@ -165,7 +161,7 @@ fn main() {
     });
 
     if let Err(e) = start_onvif_service(&config) {
-        eprintln!("ONVIF service error: {}", e);
+        eprintln!("ONVIF service error: {e}");
         std::process::exit(1);
     }
 }
@@ -174,7 +170,7 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
     println!("Creating WS-Discovery device info...");
     let device_uuid = Uuid::new_v4();
     let ws_discovery_device_info = DeviceInfo {
-        endpoint_reference: format!("urn:uuid:{}", device_uuid),
+        endpoint_reference: format!("urn:uuid:{device_uuid}"),
         types: "tdn:NetworkVideoTransmitter".to_string(),
         scopes: "onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/ONVIF-Media-Transcoder".to_string(),
         xaddrs: format!("http://{}:{}/onvif/device_service", config.container_ip, config.onvif_port),
@@ -186,8 +182,8 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
     };
 
     let ws_container_ip = config.container_ip.clone();
-    println!("Creating WS-Discovery thread with IP: {}", ws_container_ip);
-    println!("Device UUID: {}", device_uuid);
+    println!("Creating WS-Discovery thread with IP: {ws_container_ip}");
+    println!("Device UUID: {device_uuid}");
     println!("XAddrs: {}", ws_discovery_device_info.xaddrs);
 
     let spawn_result = std::panic::catch_unwind(|| {
@@ -200,24 +196,18 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
 
             while attempts < max_attempts {
                 attempts += 1;
-                println!("WS-Discovery attempt {} of {}", attempts, max_attempts);
+                println!("WS-Discovery attempt {attempts} of {max_attempts}");
 
                 match WSDiscoveryServer::new(ws_discovery_device_info.clone(), &ws_container_ip) {
                     Ok(mut server) => {
-                        println!(
-                            "WS-Discovery server created successfully on attempt {}",
-                            attempts
-                        );
+                        println!("WS-Discovery server created successfully on attempt {attempts}");
                         match server.start() {
                             Ok(_) => {
                                 println!("WS-Discovery server completed normally");
                                 return; // Exit thread normally
                             }
                             Err(e) => {
-                                eprintln!(
-                                    "WS-Discovery server error on attempt {}: {}",
-                                    attempts, e
-                                );
+                                eprintln!("WS-Discovery server error on attempt {attempts}: {e}");
                                 if attempts < max_attempts {
                                     println!("Retrying WS-Discovery in 2 seconds...");
                                     std::thread::sleep(std::time::Duration::from_secs(2));
@@ -227,8 +217,7 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
                     }
                     Err(e) => {
                         eprintln!(
-                            "Failed to create WS-Discovery server on attempt {}: {}",
-                            attempts, e
+                            "Failed to create WS-Discovery server on attempt {attempts}: {e}"
                         );
                         if attempts < max_attempts {
                             println!("Retrying WS-Discovery creation in 2 seconds...");
@@ -239,8 +228,7 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
             }
 
             eprintln!(
-                "WS-Discovery failed after {} attempts - continuing without device discovery",
-                max_attempts
+                "WS-Discovery failed after {max_attempts} attempts - continuing without device discovery"
             );
             println!("WS-Discovery thread ending");
         })
@@ -271,17 +259,17 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
     println!("WS-Discovery device discovery is running");
 
     let bind_addr = format!("0.0.0.0:{}", config.onvif_port);
-    println!("Attempting to bind to address: {}", bind_addr);
+    println!("Attempting to bind to address: {bind_addr}");
 
     // Add more detailed error handling for port binding
     let listener = match TcpListener::bind(&bind_addr) {
         Ok(listener) => {
-            println!("Successfully bound to {}", bind_addr);
+            println!("Successfully bound to {bind_addr}");
             listener
         }
         Err(e) => {
             let error_msg = format!("Failed to bind to ONVIF port {}: {}", config.onvif_port, e);
-            eprintln!("{}", error_msg);
+            eprintln!("{error_msg}");
 
             // Check if port is already in use
             if e.kind() == std::io::ErrorKind::AddrInUse {
@@ -300,7 +288,7 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
         }
     };
 
-    println!("Successfully bound to {}", bind_addr);
+    println!("Successfully bound to {bind_addr}");
     println!("ONVIF Camera service running on port {}", config.onvif_port);
     println!("Device discovery available via WS-Discovery");
     println!("Stream URI: {}", config.rtsp_input);
@@ -313,7 +301,7 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
             Ok(stream) => {
                 // Set TCP socket options for better WiFi performance
                 if let Err(e) = stream.set_nodelay(true) {
-                    eprintln!("Warning: Failed to set TCP_NODELAY: {}", e);
+                    eprintln!("Warning: Failed to set TCP_NODELAY: {e}");
                 }
 
                 connection_count += 1;
@@ -328,40 +316,36 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
 
                 let thread_result = std::panic::catch_unwind(|| {
                     thread::spawn(move || {
-                        println!("Thread started for connection #{}", conn_id);
+                        println!("Thread started for connection #{conn_id}");
                         match handle_onvif_request(stream, &config_clone) {
                             Ok(_) => {
-                                println!("Successfully handled request #{}", conn_id);
+                                println!("Successfully handled request #{conn_id}");
                             }
                             Err(e) => {
-                                eprintln!("Error handling ONVIF request #{}: {}", conn_id, e);
+                                eprintln!("Error handling ONVIF request #{conn_id}: {e}");
                                 // Don't panic on request handling errors
                             }
                         }
-                        println!("Thread completed for connection #{}", conn_id);
+                        println!("Thread completed for connection #{conn_id}");
                     })
                 });
 
                 match thread_result {
                     Ok(handle) => {
-                        println!(
-                            "Successfully spawned thread for connection #{}",
-                            connection_count
-                        );
+                        println!("Successfully spawned thread for connection #{connection_count}");
                         // We could store the handle if we wanted to join later
                         std::mem::drop(handle);
                     }
                     Err(_) => {
                         eprintln!(
-                            "Failed to spawn thread for connection #{} - panic occurred",
-                            connection_count
+                            "Failed to spawn thread for connection #{connection_count} - panic occurred"
                         );
                         // Continue serving other connections even if one thread panics
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Error accepting connection: {}", e);
+                eprintln!("Error accepting connection: {e}");
                 // Don't exit on connection errors, just log and continue
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -370,10 +354,7 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
 
         // Periodic status update
         if connection_count % 10 == 0 {
-            println!(
-                "ONVIF service is healthy - processed {} connections",
-                connection_count
-            );
+            println!("ONVIF service is healthy - processed {connection_count} connections");
         }
     }
 
@@ -396,13 +377,13 @@ fn handle_onvif_request(
         .unwrap_or_else(|_| "unknown:0".parse().unwrap());
     let connection_start = std::time::Instant::now();
 
-    println!("New connection from: {}", client_addr);
+    println!("New connection from: {client_addr}");
     let mut buffer = [0; 4096]; // Increased buffer size for larger SOAP requests
 
     // Use proper error handling instead of panic catching
     let size = stream
         .read(&mut buffer)
-        .map_err(|e| format!("Failed to read from stream: {}", e))?;
+        .map_err(|e| format!("Failed to read from stream: {e}"))?;
 
     if size == 0 {
         println!("  Connection closed by client (0 bytes read)");
@@ -417,14 +398,14 @@ fn handle_onvif_request(
 
     // Enhanced logging for debugging
     let first_line = request.lines().next().unwrap_or("Unknown");
-    println!("Received ONVIF request: {}", first_line);
+    println!("Received ONVIF request: {first_line}");
 
     // Debug: Check if we have SOAP content
     if request.contains("Envelope") && (request.contains("soap:") || request.contains("v:")) {
         println!("  Contains SOAP envelope - valid ONVIF request");
     } else {
         println!("  No SOAP envelope detected - possibly incomplete request");
-        println!("  Request size: {} bytes", size);
+        println!("  Request size: {size} bytes");
         if size < 2048 {
             println!(
                 "  Full request: {}",
@@ -450,7 +431,7 @@ fn handle_onvif_request(
     let requires_auth = !is_public_endpoint(&request);
 
     println!("  Authentication analysis:");
-    println!("    - Endpoint requires auth: {}", requires_auth);
+    println!("    - Endpoint requires auth: {requires_auth}");
 
     // Log what authentication headers/tokens we found
     if let Some(auth_header) = extract_authorization_header(&request) {
@@ -531,19 +512,19 @@ fn handle_onvif_request(
         // Detect and log unsupported ONVIF endpoints
         let unsupported_endpoint = detect_unsupported_onvif_endpoint(&request);
         if let Some(endpoint) = unsupported_endpoint {
-            eprintln!("UNSUPPORTED ONVIF ENDPOINT: {}", endpoint);
-            eprintln!("   Request details: {}", first_line);
+            eprintln!("UNSUPPORTED ONVIF ENDPOINT: {endpoint}");
+            eprintln!("   Request details: {first_line}");
             eprintln!("   This endpoint is not implemented in this ONVIF transcoder");
             eprintln!("   Consider adding support for this endpoint if needed");
             send_unsupported_endpoint_response(&mut stream, &endpoint)?;
         } else {
-            println!("Unknown request type (not ONVIF SOAP): {}", first_line);
+            println!("Unknown request type (not ONVIF SOAP): {first_line}");
             send_default_response(&mut stream)?;
         }
     }
 
     let duration = connection_start.elapsed();
-    println!("Connection handled in {:?} for {}", duration, client_addr);
+    println!("Connection handled in {duration:?} for {client_addr}");
 
     Ok(())
 }
@@ -563,7 +544,7 @@ fn send_http_response(
     );
     stream
         .write_all(response.as_bytes())
-        .map_err(|e| format!("Failed to send HTTP response: {}", e).into())
+        .map_err(|e| format!("Failed to send HTTP response: {e}").into())
 }
 
 fn send_soap_response(
@@ -633,7 +614,7 @@ fn validate_basic_auth(auth_header: &str, username: &str, password: &str) -> boo
     if let Some(encoded) = auth_header.strip_prefix("Basic ") {
         if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded.trim()) {
             if let Ok(decoded) = String::from_utf8(decoded_bytes) {
-                let expected = format!("{}:{}", username, password);
+                let expected = format!("{username}:{password}");
                 return decoded == expected;
             }
         }
@@ -674,10 +655,10 @@ fn validate_digest_auth(auth_header: &str, request: &str, username: &str, passwo
         .unwrap_or("GET");
 
     println!("Digest Auth validation:");
-    println!("  Username: {}", auth_username);
-    println!("  Realm: {}", realm);
-    println!("  Method: {}", method);
-    println!("  URI: {}", uri);
+    println!("  Username: {auth_username}");
+    println!("  Realm: {realm}");
+    println!("  Method: {method}");
+    println!("  URI: {uri}");
 
     // Check username
     if auth_username != &username {
@@ -689,17 +670,17 @@ fn validate_digest_auth(auth_header: &str, request: &str, username: &str, passwo
     // where HA1 = MD5(username:realm:password)
     // and HA2 = MD5(method:uri)
 
-    let ha1 = format!("{}:{}:{}", username, realm, password);
+    let ha1 = format!("{username}:{realm}:{password}");
     let ha1_hash = format!("{:x}", md5::compute(ha1.as_bytes()));
 
-    let ha2 = format!("{}:{}", method, uri);
+    let ha2 = format!("{method}:{uri}");
     let ha2_hash = format!("{:x}", md5::compute(ha2.as_bytes()));
 
-    let expected_response_str = format!("{}:{}:{}", ha1_hash, nonce, ha2_hash);
+    let expected_response_str = format!("{ha1_hash}:{nonce}:{ha2_hash}");
     let expected_response = format!("{:x}", md5::compute(expected_response_str.as_bytes()));
 
-    println!("  Expected response: {}", expected_response);
-    println!("  Provided response: {}", response);
+    println!("  Expected response: {expected_response}");
+    println!("  Provided response: {response}");
 
     if response == &expected_response {
         println!("Digest Auth: Authentication successful");
@@ -720,8 +701,7 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
         let provided_username = &request[user_start + 10..user_end];
         if provided_username != username {
             println!(
-                "    WS-Security: Username mismatch. Expected: {}, Got: {}",
-                username, provided_username
+                "    WS-Security: Username mismatch. Expected: {username}, Got: {provided_username}"
             );
             return false;
         }
@@ -754,9 +734,7 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
                                 if let Some(nonce_end_pos) =
                                     request[content_start..].find("</Nonce>")
                                 {
-                                    let nonce_value =
-                                        &request[content_start..content_start + nonce_end_pos];
-                                    nonce_value
+                                    &request[content_start..content_start + nonce_end_pos]
                                 } else {
                                     println!("    WS-Security: Found <Nonce but no </Nonce>");
                                     ""
@@ -783,9 +761,7 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
                                 if let Some(created_end_pos) =
                                     request[content_start..].find("</Created>")
                                 {
-                                    let created_value =
-                                        &request[content_start..content_start + created_end_pos];
-                                    created_value
+                                    &request[content_start..content_start + created_end_pos]
                                 } else {
                                     println!("    WS-Security: Found <Created but no </Created>");
                                     ""
@@ -838,7 +814,7 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
                             return false;
                         }
                     } else {
-                        println!("    WS-Security: Invalid timestamp format: {}", created);
+                        println!("    WS-Security: Invalid timestamp format: {created}");
                         return false;
                     }
 
@@ -846,7 +822,7 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
                     let nonce_bytes = match general_purpose::STANDARD.decode(nonce) {
                         Ok(bytes) => bytes,
                         Err(e) => {
-                            println!("    WS-Security: Failed to decode nonce: {}", e);
+                            println!("    WS-Security: Failed to decode nonce: {e}");
                             return false;
                         }
                     };
@@ -858,7 +834,7 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
                     hasher.update(password.as_bytes());
                     let hash_result = hasher.finalize();
 
-                    let expected_digest = general_purpose::STANDARD.encode(&hash_result);
+                    let expected_digest = general_purpose::STANDARD.encode(hash_result);
 
                     if password_value == expected_digest {
                         println!("    WS-Security: Authentication successful");
@@ -904,7 +880,7 @@ fn send_auth_required_response(stream: &mut TcpStream) -> Result<(), Box<dyn std
     let auth_response = get_auth_required_response();
     stream
         .write_all(auth_response.as_bytes())
-        .map_err(|e| format!("Failed to send auth required response: {}", e).into())
+        .map_err(|e| format!("Failed to send auth required response: {e}").into())
 }
 
 fn send_capabilities_response(
@@ -1026,8 +1002,8 @@ fn detect_unsupported_onvif_endpoint(request: &str) -> Option<String> {
             if line.to_lowercase().contains("soapaction:") {
                 if let Some(action) = line.split('"').nth(1) {
                     if action.contains("onvif.org") {
-                        let action_name = action.split('/').last().unwrap_or("UnknownAction");
-                        return Some(format!("Unknown ONVIF Action: {}", action_name));
+                        let action_name = action.split('/').next_back().unwrap_or("UnknownAction");
+                        return Some(format!("Unknown ONVIF Action: {action_name}"));
                     }
                 }
             }
@@ -1043,8 +1019,8 @@ fn detect_unsupported_onvif_endpoint(request: &str) -> Option<String> {
                             &body_content[action_start + 1..action_start + 1 + action_end];
                         if action_tag.contains(':') && !action_tag.contains("soap:") {
                             let action_name =
-                                action_tag.split(':').last().unwrap_or("UnknownAction");
-                            return Some(format!("Unknown ONVIF Action: {}", action_name));
+                                action_tag.split(':').next_back().unwrap_or("UnknownAction");
+                            return Some(format!("Unknown ONVIF Action: {action_name}"));
                         }
                     }
                 }

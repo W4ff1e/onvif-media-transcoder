@@ -60,24 +60,24 @@ impl WSDiscoveryServer {
         interface_addr: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // Bind to the multicast address
-        let bind_addr = format!("{}:3702", interface_addr);
+        let bind_addr = format!("{interface_addr}:3702");
         let socket = UdpSocket::bind(&bind_addr)
-            .map_err(|e| format!("Failed to bind to {}: {}", bind_addr, e))?;
+            .map_err(|e| format!("Failed to bind to {bind_addr}: {e}"))?;
 
         // Join the multicast group
         let multicast_addr: Ipv4Addr = "239.255.255.250"
             .parse()
-            .map_err(|e| format!("Invalid multicast address: {}", e))?;
+            .map_err(|e| format!("Invalid multicast address: {e}"))?;
         let interface_addr: Ipv4Addr = interface_addr
             .parse()
-            .map_err(|e| format!("Invalid interface address: {}", e))?;
+            .map_err(|e| format!("Invalid interface address: {e}"))?;
 
         socket
             .join_multicast_v4(&multicast_addr, &interface_addr)
-            .map_err(|e| format!("Failed to join multicast group: {}", e))?;
+            .map_err(|e| format!("Failed to join multicast group: {e}"))?;
 
-        println!("WS-Discovery server bound to {}", bind_addr);
-        println!("Joined multicast group {}", WS_DISCOVERY_MULTICAST_ADDR);
+        println!("WS-Discovery server bound to {bind_addr}");
+        println!("Joined multicast group {WS_DISCOVERY_MULTICAST_ADDR}");
 
         Ok(WSDiscoveryServer {
             device_info,
@@ -105,11 +105,11 @@ impl WSDiscoveryServer {
                 Ok((size, src)) => {
                     let message = String::from_utf8_lossy(&buffer[..size]);
                     if let Err(e) = self.handle_message(&message, src) {
-                        eprintln!("Error handling WS-Discovery message from {}: {}", src, e);
+                        eprintln!("Error handling WS-Discovery message from {src}: {e}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error receiving WS-Discovery message: {}", e);
+                    eprintln!("Error receiving WS-Discovery message: {e}");
                     break;
                 }
             }
@@ -134,7 +134,7 @@ impl WSDiscoveryServer {
         // Log first line of message for debugging (avoid logging full XML for brevity)
         let first_line = message.lines().next().unwrap_or("").trim();
         if !first_line.is_empty() {
-            println!("Received WS-Discovery message from {}: {}", src, first_line);
+            println!("Received WS-Discovery message from {src}: {first_line}");
         }
 
         // Check if this is a Probe request
@@ -186,11 +186,11 @@ impl WSDiscoveryServer {
 
         let multicast_addr: SocketAddr = WS_DISCOVERY_MULTICAST_ADDR
             .parse()
-            .map_err(|e| format!("Invalid multicast address: {}", e))?;
+            .map_err(|e| format!("Invalid multicast address: {e}"))?;
 
         self.socket
             .send_to(hello_message.as_bytes(), multicast_addr)
-            .map_err(|e| format!("Failed to send Hello message: {}", e))?;
+            .map_err(|e| format!("Failed to send Hello message: {e}"))?;
 
         println!("Sent Hello message");
         Ok(())
@@ -208,11 +208,11 @@ impl WSDiscoveryServer {
 
         let multicast_addr: SocketAddr = WS_DISCOVERY_MULTICAST_ADDR
             .parse()
-            .map_err(|e| format!("Invalid multicast address: {}", e))?;
+            .map_err(|e| format!("Invalid multicast address: {e}"))?;
 
         self.socket
             .send_to(bye_message.as_bytes(), multicast_addr)
-            .map_err(|e| format!("Failed to send Bye message: {}", e))?;
+            .map_err(|e| format!("Failed to send Bye message: {e}"))?;
 
         println!("Sent Bye message");
         Ok(())
@@ -236,9 +236,9 @@ impl WSDiscoveryServer {
 
         self.socket
             .send_to(probe_match.as_bytes(), dest)
-            .map_err(|e| format!("Failed to send ProbeMatch to {}: {}", dest, e))?;
+            .map_err(|e| format!("Failed to send ProbeMatch to {dest}: {e}"))?;
 
-        println!("Sent ProbeMatch to {}", dest);
+        println!("Sent ProbeMatch to {dest}");
         Ok(())
     }
 
@@ -374,7 +374,7 @@ impl WSDiscoveryServer {
 impl Drop for WSDiscoveryServer {
     fn drop(&mut self) {
         if let Err(e) = self.send_bye() {
-            eprintln!("Failed to send Bye message on drop: {}", e);
+            eprintln!("Failed to send Bye message on drop: {e}");
         }
     }
 }
@@ -389,15 +389,15 @@ impl Drop for WSDiscoveryServer {
 pub fn get_default_interface_ip() -> Result<String, Box<dyn std::error::Error>> {
     // Try to connect to a remote address to determine our local IP
     let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind temporary socket: {}", e))?;
+        .map_err(|e| format!("Failed to bind temporary socket: {e}"))?;
 
     socket
         .connect("8.8.8.8:80")
-        .map_err(|e| format!("Failed to connect to determine local IP: {}", e))?;
+        .map_err(|e| format!("Failed to connect to determine local IP: {e}"))?;
 
     let local_addr = socket
         .local_addr()
-        .map_err(|e| format!("Failed to get local address: {}", e))?;
+        .map_err(|e| format!("Failed to get local address: {e}"))?;
 
     Ok(local_addr.ip().to_string())
 }
