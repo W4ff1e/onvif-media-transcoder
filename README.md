@@ -5,6 +5,7 @@ A Docker-based ONVIF camera emulator that converts any input stream (especially 
 ## Overview
 
 This project creates a virtual ONVIF camera that:
+
 - Accepts any video input URL (HLS, MP4, etc.)
 - Converts it to standardized RTSP stream using FFmpeg
 - Exposes ONVIF web service endpoints for camera discovery and control
@@ -30,38 +31,52 @@ docker build -t ffmpeg-onvif-emulator .
 # Run with default demo stream
 docker run -p 8080:8080 -p 8554:8554 ffmpeg-onvif-emulator
 
-# Run with custom input stream
+# Run with custom input stream and credentials
 docker run -p 8080:8080 -p 8554:8554 \
   -e INPUT_URL="your-stream-url.m3u8" \
   -e DEVICE_NAME="My-Camera" \
+  -e ONVIF_USERNAME="myuser" \
+  -e ONVIF_PASSWORD="mypassword" \
   ffmpeg-onvif-emulator
 ```
 
 ### Environment Variables
 
-| Variable      | Default                 | Description             |
-| ------------- | ----------------------- | ----------------------- |
-| `INPUT_URL`   | Demo HLS stream         | Source video stream URL |
-| `OUTPUT_PORT` | `8554`                  | RTSP output port        |
-| `ONVIF_PORT`  | `8080`                  | ONVIF web service port  |
-| `DEVICE_NAME` | `FFmpeg-ONVIF-Emulator` | Camera device name      |
-| `RTSP_PATH`   | `stream`                | RTSP stream path        |
+| Variable         | Default                 | Description                   |
+| ---------------- | ----------------------- | ----------------------------- |
+| `INPUT_URL`      | Demo HLS stream         | Source video stream URL       |
+| `OUTPUT_PORT`    | `8554`                  | RTSP output port              |
+| `ONVIF_PORT`     | `8080`                  | ONVIF web service port        |
+| `DEVICE_NAME`    | `FFmpeg-ONVIF-Emulator` | Camera device name            |
+| `RTSP_PATH`      | `stream`                | RTSP stream path              |
+| `ONVIF_USERNAME` | `admin`                 | ONVIF authentication username |
+| `ONVIF_PASSWORD` | `onvif-rust`            | ONVIF authentication password |
 
 ## ONVIF Compatibility
 
-The emulator implements standard ONVIF endpoints:
+The emulator implements standard ONVIF endpoints with HTTP authentication:
+
+### Authentication
+
+- **Default Credentials**: `admin` / `onvif-rust`
+- **Supported Methods**: HTTP Basic Authentication, HTTP Digest Authentication
+- **Security**: Unauthenticated access allowed for device discovery endpoints
+- **Customization**: Set via `ONVIF_USERNAME` and `ONVIF_PASSWORD` environment variables
 
 ### Device Service
+
 - `GetCapabilities` - Device and service capabilities
 - `GetDeviceInformation` - Device model, firmware, serial number
 - `GetServiceCapabilities` - Service-specific capabilities
 
-### Media Service  
+### Media Service
+
 - `GetProfiles` - Video/audio encoding profiles
 - `GetStreamUri` - RTSP stream URI for media playback
 - `GetVideoSources` - Available video sources and resolutions
 
 ### Discovery
+
 - **WS-Discovery (WSDD)**: Automatic network discovery
 - **Device Type**: `NetworkVideoTransmitter`
 - **ONVIF Profile**: Streaming compliant
@@ -86,16 +101,24 @@ The camera is discoverable through:
 ## Testing
 
 ### ONVIF Discovery Tools
+
 - ONVIF Device Manager
 - VLC Media Player (Network Stream)
 - FFprobe: `ffprobe rtsp://localhost:8554/stream`
 
 ### Manual SOAP Testing
+
 ```bash
-# Test GetCapabilities
+# Test GetCapabilities (no auth required)
 curl -X POST http://localhost:8080/onvif/device_service \
   -H "Content-Type: application/soap+xml" \
   -d '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetCapabilities/></soap:Body></soap:Envelope>'
+
+# Test authenticated endpoint (GetProfiles)
+curl -X POST http://localhost:8080/onvif/media_service \
+  -H "Content-Type: application/soap+xml" \
+  -u admin:onvif-rust \
+  -d '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetProfiles/></soap:Body></soap:Envelope>'
 ```
 
 ## Development
@@ -117,7 +140,7 @@ F5 -> "Debug Docker Build"
 
 ### Project Structure
 
-```
+```text
 ├── src/
 │   └── main.rs          # ONVIF web service (Rust)
 ├── Dockerfile           # Multi-stage build

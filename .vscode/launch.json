@@ -5,13 +5,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "dockerfile",
-            "request": "launch",
-            "name": "Docker: Debug Build (DAP)",
-            "dockerfile": "Dockerfile",
-            "contextPath": "${workspaceFolder}"
-        },
-        {
             "name": "Docker: Build and Run (Test)",
             "type": "cppdbg",
             "request": "launch",

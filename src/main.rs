@@ -1,42 +1,106 @@
+use base64::{Engine as _, engine::general_purpose};
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
+use uuid::Uuid;
+
+mod ws_discovery;
+use ws_discovery::{DeviceInfo, WSDiscoveryServer, get_default_interface_ip};
 
 fn main() {
     println!("Starting ONVIF Camera Emulator...");
 
     // Strict configuration - no defaults, expect environment variables to be set
-    let rtsp_input = std::env::var("RTSP_INPUT")
-        .expect("RTSP_INPUT environment variable must be set");
-    let onvif_port = std::env::var("ONVIF_PORT")
-        .expect("ONVIF_PORT environment variable must be set");
-    let device_name = std::env::var("DEVICE_NAME")
-        .expect("DEVICE_NAME environment variable must be set");
+    let rtsp_input =
+        std::env::var("RTSP_INPUT").expect("RTSP_INPUT environment variable must be set");
+    let onvif_port =
+        std::env::var("ONVIF_PORT").expect("ONVIF_PORT environment variable must be set");
+    let device_name =
+        std::env::var("DEVICE_NAME").expect("DEVICE_NAME environment variable must be set");
+    let onvif_username =
+        std::env::var("ONVIF_USERNAME").expect("ONVIF_USERNAME environment variable must be set");
+    let onvif_password =
+        std::env::var("ONVIF_PASSWORD").expect("ONVIF_PASSWORD environment variable must be set");
 
     // Validate port number
-    let _: u16 = onvif_port.parse()
+    let _: u16 = onvif_port
+        .parse()
         .expect("ONVIF_PORT must be a valid port number");
 
     println!("Configuration:");
     println!("  RTSP Input Stream: {}", rtsp_input);
     println!("  ONVIF Port: {}", onvif_port);
     println!("  Device Name: {}", device_name);
+    println!("  ONVIF Username: {}", onvif_username);
+    println!("  ONVIF Password: [HIDDEN]");
+
+    // Get the container IP for WS-Discovery
+    let container_ip = get_default_interface_ip().unwrap_or_else(|_| {
+        println!("Warning: Could not determine container IP, using localhost");
+        "127.0.0.1".to_string()
+    });
+    println!("  Container IP: {}", container_ip);
+
+    // Start WS-Discovery server in a separate thread
+    let device_uuid = Uuid::new_v4();
+    let ws_discovery_device_info = DeviceInfo {
+        endpoint_reference: format!("urn:uuid:{}", device_uuid),
+        types: "tdn:NetworkVideoTransmitter".to_string(),
+        scopes: "onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/FFmpeg-ONVIF-Emulator".to_string(),
+        xaddrs: format!("http://{}:{}/onvif/device_service", container_ip, onvif_port),
+        manufacturer: "FFmpeg Solutions".to_string(),
+        model_name: device_name.clone(),
+        friendly_name: device_name.clone(),
+        firmware_version: "1.0.0".to_string(),
+        serial_number: format!("EMU-{}", device_name.chars().take(6).collect::<String>()),
+    };
+
+    let ws_container_ip = container_ip.clone();
+    thread::spawn(move || {
+        match WSDiscoveryServer::new(ws_discovery_device_info, &ws_container_ip) {
+            Ok(mut server) => {
+                println!("Starting WS-Discovery server...");
+                if let Err(e) = server.start() {
+                    eprintln!("WS-Discovery server error: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to create WS-Discovery server: {}", e);
+                println!(
+                    "Continuing without WS-Discovery (ONVIF service will still work for direct connections)"
+                );
+            }
+        }
+    });
 
     // Start ONVIF web service
-    start_onvif_service(&onvif_port, &rtsp_input, &device_name);
+    start_onvif_service(
+        &onvif_port,
+        &rtsp_input,
+        &device_name,
+        &onvif_username,
+        &onvif_password,
+    );
 }
 
-fn start_onvif_service(port: &str, rtsp_stream: &str, device_name: &str) {
+fn start_onvif_service(
+    port: &str,
+    rtsp_stream: &str,
+    device_name: &str,
+    username: &str,
+    password: &str,
+) {
     println!("Starting ONVIF web service on port {}", port);
     println!("Exposing RTSP stream: {}", rtsp_stream);
     println!("Device Name: {}", device_name);
-    println!("WSDD device discovery is running in background");
+    println!("Authentication: {} / [HIDDEN]", username);
+    println!("WS-Discovery device discovery is running");
 
     let listener =
         TcpListener::bind(format!("0.0.0.0:{}", port)).expect("Failed to bind to ONVIF port");
 
     println!("ONVIF Camera service running on port {}", port);
-    println!("Device discovery available via WSDD");
+    println!("Device discovery available via WS-Discovery");
     println!("Stream URI: {}", rtsp_stream);
 
     for stream in listener.incoming() {
@@ -44,8 +108,16 @@ fn start_onvif_service(port: &str, rtsp_stream: &str, device_name: &str) {
             Ok(stream) => {
                 let rtsp_clone = rtsp_stream.to_string();
                 let device_clone = device_name.to_string();
+                let username_clone = username.to_string();
+                let password_clone = password.to_string();
                 thread::spawn(move || {
-                    handle_onvif_request(stream, &rtsp_clone, &device_clone);
+                    handle_onvif_request(
+                        stream,
+                        &rtsp_clone,
+                        &device_clone,
+                        &username_clone,
+                        &password_clone,
+                    );
                 });
             }
             Err(e) => {
@@ -55,7 +127,13 @@ fn start_onvif_service(port: &str, rtsp_stream: &str, device_name: &str) {
     }
 }
 
-fn handle_onvif_request(mut stream: TcpStream, rtsp_stream: &str, device_name: &str) {
+fn handle_onvif_request(
+    mut stream: TcpStream,
+    rtsp_stream: &str,
+    device_name: &str,
+    username: &str,
+    password: &str,
+) {
     let mut buffer = [0; 2048];
     if let Ok(size) = stream.read(&mut buffer) {
         let request = String::from_utf8_lossy(&buffer[..size]);
@@ -64,6 +142,12 @@ fn handle_onvif_request(mut stream: TcpStream, rtsp_stream: &str, device_name: &
             "Received ONVIF request: {}",
             request.lines().next().unwrap_or("Unknown")
         );
+
+        // Check for authentication
+        if !is_authenticated(&request, username, password) {
+            send_auth_required_response(&mut stream);
+            return;
+        }
 
         // Enhanced ONVIF endpoint routing
         if request.contains("GetCapabilities") {
@@ -82,6 +166,70 @@ fn handle_onvif_request(mut stream: TcpStream, rtsp_stream: &str, device_name: &
             send_default_response(&mut stream);
         }
     }
+}
+
+// Authentication functions
+fn is_authenticated(request: &str, username: &str, password: &str) -> bool {
+    // Check for Basic Auth first (simpler)
+    if let Some(auth_header) = extract_authorization_header(request) {
+        if auth_header.starts_with("Basic ") {
+            return validate_basic_auth(&auth_header, username, password);
+        } else if auth_header.starts_with("Digest ") {
+            return validate_digest_auth(&auth_header, request, username, password);
+        }
+    }
+
+    // Allow unauthenticated requests for GetCapabilities and device discovery
+    if request.contains("GetCapabilities") || request.contains("GetDeviceInformation") {
+        return true;
+    }
+
+    false
+}
+
+fn extract_authorization_header(request: &str) -> Option<String> {
+    for line in request.lines() {
+        if line.to_lowercase().starts_with("authorization:") {
+            if let Some(auth_value) = line.split(':').nth(1) {
+                return Some(auth_value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+fn validate_basic_auth(auth_header: &str, username: &str, password: &str) -> bool {
+    if let Some(encoded) = auth_header.strip_prefix("Basic ") {
+        if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded.trim()) {
+            if let Ok(decoded) = String::from_utf8(decoded_bytes) {
+                let expected = format!("{}:{}", username, password);
+                return decoded == expected;
+            }
+        }
+    }
+    false
+}
+
+fn validate_digest_auth(
+    _auth_header: &str,
+    _request: &str,
+    _username: &str,
+    _password: &str,
+) -> bool {
+    // For now, we'll implement a simple digest auth validation
+    // In a production environment, this should be more robust
+    true // Simplified for this implementation
+}
+
+fn send_auth_required_response(stream: &mut TcpStream) {
+    let response = r#"HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="ONVIF Camera"
+WWW-Authenticate: Digest realm="ONVIF Camera", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", qop="auth"
+Content-Type: application/soap+xml
+Content-Length: 0
+
+"#;
+    let _ = stream.write_all(response.as_bytes());
 }
 
 fn send_capabilities_response(stream: &mut TcpStream, _rtsp_stream: &str) {

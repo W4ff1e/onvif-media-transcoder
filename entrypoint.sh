@@ -4,12 +4,13 @@ echo "========================================"
 echo "FFmpeg ONVIF Camera Emulator Starting"
 echo "========================================"
 
-# Strict validation - all required environment variables must be set
+# Validation function - all environment variables should be set in Dockerfile
 validate_env() {
     local errors=0
     
     if [[ -z "$INPUT_URL" ]]; then
         echo "ERROR: INPUT_URL environment variable is not set"
+        echo "       Example: https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8"
         errors=$((errors + 1))
     fi
     
@@ -18,6 +19,14 @@ validate_env() {
         errors=$((errors + 1))
     elif ! [[ "$OUTPUT_PORT" =~ ^[0-9]+$ ]] || [ "$OUTPUT_PORT" -lt 1 ] || [ "$OUTPUT_PORT" -gt 65535 ]; then
         echo "ERROR: OUTPUT_PORT must be a valid port number (1-65535), got: $OUTPUT_PORT"
+        errors=$((errors + 1))
+    fi
+    
+    if [[ -z "$RTSP_OUTPUT_PORT" ]]; then
+        echo "ERROR: RTSP_OUTPUT_PORT environment variable is not set"
+        errors=$((errors + 1))
+    elif ! [[ "$RTSP_OUTPUT_PORT" =~ ^[0-9]+$ ]] || [ "$RTSP_OUTPUT_PORT" -lt 1 ] || [ "$RTSP_OUTPUT_PORT" -gt 65535 ]; then
+        echo "ERROR: RTSP_OUTPUT_PORT must be a valid port number (1-65535), got: $RTSP_OUTPUT_PORT"
         errors=$((errors + 1))
     fi
     
@@ -42,9 +51,32 @@ validate_env() {
         errors=$((errors + 1))
     fi
     
-    # Validate INPUT_URL format (basic check)
-    if [[ -n "$INPUT_URL" ]] && ! [[ "$INPUT_URL" =~ ^https?:// ]]; then
-        echo "WARNING: INPUT_URL should start with http:// or https://, got: $INPUT_URL"
+    if [[ -z "$ONVIF_USERNAME" ]]; then
+        echo "ERROR: ONVIF_USERNAME environment variable is not set"
+        errors=$((errors + 1))
+    elif [[ ${#ONVIF_USERNAME} -lt 3 ]]; then
+        echo "ERROR: ONVIF_USERNAME must be at least 3 characters long, got: $ONVIF_USERNAME"
+        errors=$((errors + 1))
+    fi
+    
+    if [[ -z "$ONVIF_PASSWORD" ]]; then
+        echo "ERROR: ONVIF_PASSWORD environment variable is not set"
+        errors=$((errors + 1))
+    elif [[ ${#ONVIF_PASSWORD} -lt 6 ]]; then
+        echo "ERROR: ONVIF_PASSWORD must be at least 6 characters long, got: $ONVIF_PASSWORD"
+        errors=$((errors + 1))
+    fi
+    
+    # Validate INPUT_URL format (FFmpeg supports many protocols)
+    if [[ -n "$INPUT_URL" ]]; then
+        # Check if it's a valid URL/path format that FFmpeg can handle
+        # FFmpeg supports: http(s)://, rtsp://, rtmp://, udp://, tcp://, file paths, etc.
+        if [[ "$INPUT_URL" =~ ^[a-zA-Z]+:// ]] || [[ -f "$INPUT_URL" ]] || [[ "$INPUT_URL" =~ ^/ ]]; then
+            echo "INFO: INPUT_URL format accepted: $INPUT_URL"
+        else
+            echo "WARNING: INPUT_URL format may not be supported by FFmpeg: $INPUT_URL"
+            echo "         FFmpeg supports: http(s)://, rtsp://, rtmp://, udp://, tcp://, file paths, etc."
+        fi
     fi
     
     if [ $errors -gt 0 ]; then
@@ -61,126 +93,195 @@ echo "Validating environment variables..."
 validate_env
 
 # Configuration summary
-RTSP_OUTPUT_URL="rtsp://0.0.0.0:${OUTPUT_PORT}/${RTSP_PATH}"
-RTSP_INPUT_URL="rtsp://localhost:${OUTPUT_PORT}/${RTSP_PATH}"
+# We'll re-encode the input stream to a proper ONVIF-compatible RTSP stream
+
+# Get the container's actual IP address (not 0.0.0.0)
+CONTAINER_IP=$(hostname -i | awk '{print $1}')
+if [[ -z "$CONTAINER_IP" ]] || [[ "$CONTAINER_IP" == "0.0.0.0" ]]; then
+    # Fallback methods to get container IP
+    CONTAINER_IP=$(ip route get 1 | awk '{print $7; exit}' 2>/dev/null)
+    if [[ -z "$CONTAINER_IP" ]]; then
+        CONTAINER_IP=$(hostname -I | awk '{print $1}')
+    fi
+    if [[ -z "$CONTAINER_IP" ]]; then
+        echo "WARNING: Could not determine container IP, using localhost"
+        CONTAINER_IP="localhost"
+    fi
+fi
+
+RTSP_OUTPUT_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 
 echo "Configuration validated successfully:"
 echo "  Input URL: ${INPUT_URL}"
+echo "  Container IP: ${CONTAINER_IP}"
 echo "  RTSP Output: ${RTSP_OUTPUT_URL}"
 echo "  ONVIF Port: ${ONVIF_PORT}"
 echo "  Device Name: ${DEVICE_NAME}"
+echo "  ONVIF Username: ${ONVIF_USERNAME}"
+echo "  ONVIF Password: [HIDDEN]"
 echo "----------------------------------------"
 
 # Export environment variables for Rust application
-export RTSP_INPUT="${RTSP_INPUT_URL}"
+export RTSP_INPUT="${RTSP_OUTPUT_URL}"
 export ONVIF_PORT="${ONVIF_PORT}"
 export DEVICE_NAME="${DEVICE_NAME}"
+export ONVIF_USERNAME="${ONVIF_USERNAME}"
+export ONVIF_PASSWORD="${ONVIF_PASSWORD}"
 
 # Start WS-Discovery service for ONVIF device discovery
-echo "Starting WSDD (WS-Discovery) service..."
-
-# Get container IP for WSDD
-CONTAINER_IP=$(hostname -i)
-if [[ -z "$CONTAINER_IP" ]]; then
-    echo "ERROR: Unable to determine container IP address"
-    exit 1
-fi
-
+echo "Starting ONVIF device discovery..."
 echo "Container IP: $CONTAINER_IP"
+echo "INFO: WS-Discovery implemented in Rust (integrated with ONVIF service)"
+echo "      ONVIF service is available at: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
+WSDD_PID=0
 
-wsdd \
-    --type NetworkVideoTransmitter \
-    --xaddr "http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/device_service" \
-    --scope "onvif://www.onvif.org/Profile/Streaming" \
-    --endpoint ${DEVICE_NAME} &
+# Function to manage FFmpeg logs with size capping
+manage_ffmpeg_log() {
+    local log_file="/tmp/ffmpeg.log"
+    local max_lines=1000
+    local keep_head=500
+    local keep_tail=500
+    
+    # Monitor log file size and truncate if needed
+    while true; do
+        sleep 30
+        if [[ -f "$log_file" ]]; then
+            local line_count=$(wc -l < "$log_file")
+            if [[ $line_count -gt $max_lines ]]; then
+                echo "$(date): FFmpeg log reached $line_count lines, truncating..." >> "$log_file"
+                
+                # Keep first 500 and last 500 lines
+                head -n $keep_head "$log_file" > "${log_file}.tmp"
+                echo "" >> "${log_file}.tmp"
+                echo "=== LOG TRUNCATED $(date) ===" >> "${log_file}.tmp"
+                echo "" >> "${log_file}.tmp"
+                tail -n $keep_tail "$log_file" >> "${log_file}.tmp"
+                mv "${log_file}.tmp" "$log_file"
+                
+                echo "$(date): FFmpeg log truncated, keeping first $keep_head and last $keep_tail lines" >> "$log_file"
+            fi
+        fi
+    done
+}
 
-WSDD_PID=$!
-if ! kill -0 $WSDD_PID 2>/dev/null; then
-    echo "ERROR: Failed to start WSDD service"
-    exit 1
-fi
-echo "WSDD started with PID: $WSDD_PID"
+# Function to dump FFmpeg log on error
+dump_ffmpeg_log() {
+    local log_file="/tmp/ffmpeg.log"
+    if [[ -f "$log_file" ]]; then
+        echo "========================================" 
+        echo "FFmpeg Log (Last 100 lines):"
+        echo "========================================"
+        tail -n 100 "$log_file"
+        echo "========================================"
+    else
+        echo "No FFmpeg log file found"
+    fi
+}
 
-# Start ffmpeg to convert input stream to RTSP
-echo "Starting FFmpeg stream conversion..."
-echo "Converting: ${INPUT_URL} -> ${RTSP_OUTPUT_URL}"
+# Start ffmpeg to re-encode input stream to ONVIF-compatible RTSP
+echo "Starting FFmpeg RTSP server..."
+echo "Re-encoding: ${INPUT_URL} -> rtsp://0.0.0.0:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 
+# Create log directory
+mkdir -p /tmp
+
+# Start log management in background
+manage_ffmpeg_log &
+LOG_MANAGER_PID=$!
+
+# Start FFmpeg with RTSP server output using the simpler format
+# Listen on all interfaces (0.0.0.0) for the RTSP server
 ffmpeg \
-    -fflags +genpts \
     -re \
     -i "${INPUT_URL}" \
     -c:v libx264 \
     -preset veryfast \
-    -crf 23 \
-    -maxrate 4M \
-    -bufsize 8M \
+    -tune zerolatency \
+    -profile:v baseline \
+    -level 3.1 \
+    -pix_fmt yuv420p \
     -g 30 \
     -keyint_min 30 \
     -sc_threshold 0 \
+    -b:v 2M \
+    -maxrate 4M \
+    -bufsize 8M \
     -c:a aac \
     -b:a 128k \
     -ar 48000 \
+    -ac 2 \
     -f rtsp \
     -rtsp_transport tcp \
-    "${RTSP_OUTPUT_URL}" &
+    "rtsp://0.0.0.0:${RTSP_OUTPUT_PORT}${RTSP_PATH}" \
+    > /tmp/ffmpeg.log 2>&1 &
 
 FFMPEG_PID=$!
 if ! kill -0 $FFMPEG_PID 2>/dev/null; then
-    echo "ERROR: Failed to start FFmpeg stream conversion"
+    echo "ERROR: Failed to start FFmpeg RTSP server"
+    dump_ffmpeg_log
     kill $WSDD_PID 2>/dev/null
     exit 1
 fi
-echo "FFmpeg started with PID: $FFMPEG_PID"
+echo "FFmpeg RTSP server started with PID: $FFMPEG_PID"
 
-# Wait for ffmpeg to establish the stream
-echo "Waiting for FFmpeg to establish RTSP stream..."
-sleep 5
+# Wait for ffmpeg to establish the RTSP server
+echo "Waiting for FFmpeg to establish RTSP server..."
+sleep 8
 
 # Verify FFmpeg is still running
 if ! kill -0 $FFMPEG_PID 2>/dev/null; then
     echo "ERROR: FFmpeg process died during startup"
+    dump_ffmpeg_log
     kill $WSDD_PID 2>/dev/null
     exit 1
+fi
+
+# Test RTSP connection
+echo "Testing RTSP server connectivity..."
+timeout 5 ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "${RTSP_OUTPUT_URL}" >/dev/null 2>&1
+if [[ $? -eq 0 ]]; then
+    echo "RTSP server test: SUCCESS"
+else
+    echo "WARNING: RTSP server test failed, but continuing (stream may need more time to initialize)"
+    echo "FFmpeg may still be starting up..."
 fi
 
 # Start ONVIF web service (Rust application)
 echo "Starting ONVIF web service..."
 echo "ONVIF endpoints will be available at: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
 
-# Ensure we are in /app directory
-cd /app || { 
-    echo "ERROR: Failed to change to /app directory"; 
-    kill $FFMPEG_PID $WSDD_PID 2>/dev/null
-    exit 1
-}
-
 # Verify the Rust binary exists
-if [[ ! -f "./target/release/ffplay-onvif-emulator" ]]; then
-    echo "ERROR: Rust binary not found at ./target/release/ffplay-onvif-emulator"
-    kill $FFMPEG_PID $WSDD_PID 2>/dev/null
+if [[ ! -f "/usr/local/bin/ffmpeg-onvif-emulator" ]]; then
+    echo "ERROR: Rust binary not found at /usr/local/bin/ffmpeg-onvif-emulator"
+    dump_ffmpeg_log
+    kill $FFMPEG_PID $WSDD_PID $LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
 
-./target/release/ffplay-onvif-emulator &
+/usr/local/bin/ffmpeg-onvif-emulator &
 ONVIF_PID=$!
 if ! kill -0 $ONVIF_PID 2>/dev/null; then
     echo "ERROR: Failed to start ONVIF service"
-    kill $FFMPEG_PID $WSDD_PID 2>/dev/null
+    dump_ffmpeg_log
+    kill $FFMPEG_PID $WSDD_PID $LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
 echo "ONVIF service started with PID: $ONVIF_PID"
 
 echo "========================================"
 echo "Services Status:"
-echo "  WSDD (Device Discovery): PID $WSDD_PID"
-echo "  FFmpeg (Stream Converter): PID $FFMPEG_PID"
-echo "  ONVIF Service: PID $ONVIF_PID"
+echo "  WS-Discovery: Integrated with ONVIF service"
+echo "  FFmpeg (RTSP Server): PID $FFMPEG_PID"
+echo "  FFmpeg Log Manager: PID $LOG_MANAGER_PID"
+echo "  ONVIF Service (with WS-Discovery): PID $ONVIF_PID"
 echo "========================================"
 echo "ONVIF Camera Emulator is ready!"
 echo "Container IP: ${CONTAINER_IP}"
-echo "Device discoverable via WSDD"
-echo "Stream URI: ${RTSP_INPUT_URL}"
+echo "Device discovery: Enabled via native Rust WS-Discovery"
+echo "RTSP Stream: ${RTSP_OUTPUT_URL}"
 echo "ONVIF Endpoint: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
+echo "Note: Input stream is re-encoded to ONVIF-compatible RTSP"
+echo "FFmpeg logs: /tmp/ffmpeg.log (capped at 1000 lines)"
 echo "========================================"
 
 # Function to handle shutdown
@@ -188,7 +289,10 @@ cleanup() {
     echo "Shutting down services..."
     kill $ONVIF_PID 2>/dev/null
     kill $FFMPEG_PID 2>/dev/null  
-    kill $WSDD_PID 2>/dev/null
+    if [[ $WSDD_PID -ne 0 ]]; then
+        kill $WSDD_PID 2>/dev/null
+    fi
+    kill $LOG_MANAGER_PID 2>/dev/null
     wait
     echo "All services stopped."
 }
@@ -200,8 +304,8 @@ monitor_processes() {
     while true; do
         sleep 10
         
-        # Check if any process died
-        if ! kill -0 $WSDD_PID 2>/dev/null; then
+        # Skip WSDD monitoring since it's disabled
+        if [[ $WSDD_PID -ne 0 ]] && ! kill -0 $WSDD_PID 2>/dev/null; then
             echo "ERROR: WSDD process died (PID: $WSDD_PID)"
             cleanup
             exit 1
@@ -209,6 +313,7 @@ monitor_processes() {
         
         if ! kill -0 $FFMPEG_PID 2>/dev/null; then
             echo "ERROR: FFmpeg process died (PID: $FFMPEG_PID)"
+            dump_ffmpeg_log
             cleanup
             exit 1
         fi
@@ -217,6 +322,12 @@ monitor_processes() {
             echo "ERROR: ONVIF service died (PID: $ONVIF_PID)"
             cleanup
             exit 1
+        fi
+        
+        if ! kill -0 $LOG_MANAGER_PID 2>/dev/null; then
+            echo "WARNING: Log manager died (PID: $LOG_MANAGER_PID), restarting..."
+            manage_ffmpeg_log &
+            LOG_MANAGER_PID=$!
         fi
     done
 }
