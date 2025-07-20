@@ -45,6 +45,7 @@ jobs:
         fi
 
     - name: Create Release
+      id: create_release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ github.event.inputs.version }}
@@ -76,6 +77,17 @@ jobs:
         draft: ${{ github.event.inputs.draft }}
         prerelease: ${{ github.event.inputs.prerelease }}
         target_commitish: ${{ github.sha }}
+        make_latest: ${{ !github.event.inputs.prerelease }}
+
+    - name: Debug Release Creation
+      run: |
+        echo "Release created successfully!"
+        echo "Release ID: ${{ steps.create_release.outputs.id }}"
+        echo "Release URL: ${{ steps.create_release.outputs.url }}"
+        echo "Upload URL: ${{ steps.create_release.outputs.upload_url }}"
+        echo "Draft: ${{ github.event.inputs.draft }}"
+        echo "Prerelease: ${{ github.event.inputs.prerelease }}"
+        echo "This should trigger the docker-publish.yml workflow if draft=false"
 
     - name: Summary
       run: |
@@ -84,9 +96,16 @@ jobs:
         echo "**Version:** ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
         echo "**Pre-release:** ${{ github.event.inputs.prerelease }}" >> $GITHUB_STEP_SUMMARY
         echo "**Draft:** ${{ github.event.inputs.draft }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Release ID:** ${{ steps.create_release.outputs.id }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "The Docker image will be automatically built and published to:" >> $GITHUB_STEP_SUMMARY
-        echo "- \`w4ff1e/onvif-media-transcoder:${{ github.event.inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- \`w4ff1e/onvif-media-transcoder:latest\` (if not pre-release)" >> $GITHUB_STEP_SUMMARY
+        if [[ "${{ github.event.inputs.draft }}" == "false" ]]; then
+          echo "✅ **Docker Build Status:** The docker-publish.yml workflow should be triggered automatically" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Docker image will be automatically built and published to:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`w4ff1e/onvif-media-transcoder:${{ github.event.inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`w4ff1e/onvif-media-transcoder:latest\` (if not pre-release)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ **Docker Build Status:** Release created as draft - publish manually to trigger Docker build" >> $GITHUB_STEP_SUMMARY
+        fi
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "View Release: https://github.com/${{ github.repository }}/releases/tag/${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
