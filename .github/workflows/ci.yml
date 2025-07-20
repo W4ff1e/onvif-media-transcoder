@@ -81,14 +81,28 @@ jobs:
           -p 8080:8080 \
           onvif-media-transcoder:test
 
-        # Wait for service to start
-        sleep 10
+        # Wait for service to start with health check
+        echo "Waiting for ONVIF service to start..."
+        for i in {1..30}; do
+          if curl -s http://localhost:8080/onvif/device_service > /dev/null 2>&1; then
+            echo "ONVIF service is responding after ${i}0 seconds"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "ONVIF service failed to start within 5 minutes"
+            docker logs test-container
+            exit 1
+          fi
+          echo "Attempt $i/30: ONVIF service not ready yet, waiting..."
+          sleep 10
+        done
 
         # Test basic ONVIF endpoint
+        echo "Testing ONVIF GetCapabilities endpoint..."
         curl -f -X POST http://localhost:8080/onvif/device_service \
           -H "Content-Type: application/soap+xml" \
           -d '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetCapabilities/></soap:Body></soap:Envelope>' \
-          || (echo "ONVIF endpoint test failed" && exit 1)
+          || (echo "ONVIF endpoint test failed" && docker logs test-container && exit 1)
 
         echo "Docker image test passed"
 
