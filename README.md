@@ -357,7 +357,10 @@ The project includes VS Code tasks and debugging configuration:
 
 - **Build**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Docker: Build Image"
 - **Run**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Docker: Run Container (Test)"
+- **Local Development**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Rust: Run Local"
 - **Debug**: F5 to start debugging with breakpoints
+
+For local development without Docker, see [**Local Development Guide**](docs/LOCAL_DEVELOPMENT.md).
 
 ## CI/CD and Releases
 

@@ -58,6 +58,71 @@
             "problemMatcher": []
         },
         {
+            "label": "Rust: Run Local (Demo Stream)",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run"
+            ],
+            "group": "test",
+            "options": {
+                "env": {
+                    "RTSP_INPUT": "rtsp://127.0.0.1:8554/stream",
+                    "ONVIF_PORT": "8080",
+                    "DEVICE_NAME": "Local-ONVIF-Transcoder",
+                    "ONVIF_USERNAME": "admin",
+                    "ONVIF_PASSWORD": "onvif-rust"
+                }
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "Rust: Test",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "test",
+                "--",
+                "--nocapture"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "Rust: Check",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "check"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
             "label": "Docker: Run Container (Test)",
             "type": "shell",
             "command": "docker",
