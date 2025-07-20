@@ -10,28 +10,6 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 <soap:Body>
 <tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
 <tds:Capabilities>
-<tds:Media>
-<tds:Profile>
-<tds:Name>Profile1</tds:Name>
-<tds:VideoEncoder>
-<tds:Resolution>
-<tds:Width>640</tds:Width>
-<tds:Height>360</tds:Height>
-</tds:Resolution>
-<tds:Bitrate>1000</tds:Bitrate>
-<tds:FrameRate>30</tds:FrameRate>
-</tds:VideoEncoder>
-</tds:Profile>
-</tds:Media>
-</tds:Capabilities>
-</tds:GetCapabilitiesResponse>
-</soap:Body>
-</soap:Envelope>
-<tt:GovLength>15</tt:GovLength>
-<tt:H264Profile>Main</tt:H264Profile>
-<tt:Level>4.1</tt:Level>
-</tt:H264>s="http://www.onvif.org/ver10/device/wsdl">
-<tds:Capabilities>
 <tt:Device xmlns:tt="http://www.onvif.org/ver10/schema">
 <tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
 <tt:Network>
@@ -242,7 +220,7 @@ pub fn get_profiles_response() -> String {
 </tt:Resolution>
 <tt:Quality>4</tt:Quality>
 <tt:RateControl>
-<tt:FrameRateLimit>30</tt:FrameRateLimit>
+<tt:FrameRateLimit>15</tt:FrameRateLimit>
 <tt:EncodingInterval>1</tt:EncodingInterval>
 <tt:BitrateLimit>1500</tt:BitrateLimit>
 </tt:RateControl>
@@ -373,13 +351,13 @@ pub fn get_video_source_configurations_response() -> String {
 <tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="1920" height="1080"/>
+<tt:Bounds x="0" y="0" width="960" height="540"/>
 </trt:Configurations>
 <trt:Configurations token="VideoSourceConfig_LQ">
 <tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig_LQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="640" height="360"/>
+<tt:Bounds x="0" y="0" width="960" height="540"/>
 </trt:Configurations>
 </trt:GetVideoSourceConfigurationsResponse>
 </soap:Body>
@@ -397,17 +375,17 @@ pub fn get_video_encoder_configurations_response() -> String {
 <tt:UseCount>1</tt:UseCount>
 <tt:Encoding>H264</tt:Encoding>
 <tt:Resolution>
-<tt:Width>1920</tt:Width>
-<tt:Height>1080</tt:Height>
+<tt:Width>960</tt:Width>
+<tt:Height>540</tt:Height>
 </tt:Resolution>
 <tt:Quality>4</tt:Quality>
 <tt:RateControl>
-<tt:FrameRateLimit>30</tt:FrameRateLimit>
+<tt:FrameRateLimit>15</tt:FrameRateLimit>
 <tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>2000</tt:BitrateLimit>
+<tt:BitrateLimit>1500</tt:BitrateLimit>
 </tt:RateControl>
 <tt:H264>
-<tt:GovLength>30</tt:GovLength>
+<tt:GovLength>15</tt:GovLength>
 <tt:H264Profile>Main</tt:H264Profile>
 <tt:Level>4.1</tt:Level>
 </tt:H264>
@@ -427,19 +405,19 @@ pub fn get_video_encoder_configurations_response() -> String {
 <tt:UseCount>1</tt:UseCount>
 <tt:Encoding>H264</tt:Encoding>
 <tt:Resolution>
-<tt:Width>640</tt:Width>
-<tt:Height>360</tt:Height>
+<tt:Width>960</tt:Width>
+<tt:Height>540</tt:Height>
 </tt:Resolution>
-<tt:Quality>3</tt:Quality>
+<tt:Quality>4</tt:Quality>
 <tt:RateControl>
 <tt:FrameRateLimit>15</tt:FrameRateLimit>
 <tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>1000</tt:BitrateLimit>
+<tt:BitrateLimit>1500</tt:BitrateLimit>
 </tt:RateControl>
 <tt:H264>
 <tt:GovLength>15</tt:GovLength>
-<tt:H264Profile>Baseline</tt:H264Profile>
-<tt:Level>3.1</tt:Level>
+<tt:H264Profile>Main</tt:H264Profile>
+<tt:Level>4.1</tt:Level>
 </tt:H264>
 <tt:Multicast>
 <tt:Address>
