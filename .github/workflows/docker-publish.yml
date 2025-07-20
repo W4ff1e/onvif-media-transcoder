@@ -82,7 +82,6 @@ jobs:
           type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-unstable
         cache-to: |
           type=gha,mode=max
-          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-unstable,mode=max
 
   build-release:
     name: Build and Push Release
@@ -156,7 +155,6 @@ jobs:
           type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-unstable
         cache-to: |
           type=gha,mode=max
-          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-release,mode=max
         build-args: |
           BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
           VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
@@ -213,8 +211,8 @@ jobs:
 
   update-readme:
     runs-on: ubuntu-latest
-    needs: [build-unstable, build-release]
-    if: always() && (needs.build-unstable.result == 'success' || needs.build-release.result == 'success')
+    needs: [build-release]
+    if: needs.build-release.result == 'success'
     
     steps:
     - name: Checkout repository
