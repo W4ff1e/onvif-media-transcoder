@@ -1,1 +1,29 @@
+# Rust build artifacts
 /target
+Cargo.lock
+
+# Environment files
+.env
+.env.local
+.env.custom
+
+# Logs
+logs/
+*.log
+
+# IDE files
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Temporary files
+*.tmp
+*.temp
