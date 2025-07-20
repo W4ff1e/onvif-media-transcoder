@@ -1,0 +1,48 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "dockerfile",
+            "request": "launch",
+            "name": "Docker: Debug Build (DAP)",
+            "dockerfile": "Dockerfile",
+            "contextPath": "${workspaceFolder}"
+        },
+        {
+            "name": "Docker: Build and Run (Test)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/bin/echo",
+            "args": [
+                "Docker task completed"
+            ],
+            "preLaunchTask": "Docker: Build and Run",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Docker: Build Only",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/bin/echo",
+            "args": [
+                "Build completed"
+            ],
+            "preLaunchTask": "Docker: Build Image",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Docker: Run HLS Test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/bin/echo",
+            "args": [
+                "HLS test started"
+            ],
+            "preLaunchTask": "Docker: Run Container (HLS Test)",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

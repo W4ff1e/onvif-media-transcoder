@@ -1,0 +1,154 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Rust: Build",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "Rust: Build Release",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "build",
+                "--release"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "Docker: Build Image",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "build",
+                "-t",
+                "ffplay-onvif-emulator",
+                "."
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Docker: Run Container (Test)",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "run",
+                "--rm",
+                "-e",
+                "INPUT_URL=https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/",
+                "-e",
+                "RTSP_OUTPUT_PORT=8554",
+                "-e",
+                "ONVIF_PORT=8080",
+                "-p",
+                "8080:8080",
+                "-p",
+                "8554:8554",
+                "ffplay-onvif-emulator"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "problemMatcher": [],
+            "dependsOn": "Docker: Build Image"
+        },
+        {
+            "label": "Docker: Run Container (HLS Test)",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "run",
+                "--rm",
+                "-e",
+                "INPUT_URL=https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
+                "-e",
+                "RTSP_OUTPUT_PORT=8554",
+                "-e",
+                "ONVIF_PORT=8080",
+                "-p",
+                "8080:8080",
+                "-p",
+                "8554:8554",
+                "ffplay-onvif-emulator"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "problemMatcher": [],
+            "dependsOn": "Docker: Build Image"
+        },
+        {
+            "label": "Docker: Build and Run",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Docker: Build Image",
+                "Docker: Run Container (Test)"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Docker: Stop All Containers",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "stop",
+                "$(docker ps -q --filter ancestor=ffplay-onvif-emulator)"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
