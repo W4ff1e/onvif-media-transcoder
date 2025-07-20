@@ -20,6 +20,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
 
     steps:
     - name: Checkout repository
@@ -42,17 +44,14 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          # Set latest tag for default branch
-          type=ref,event=branch
-          type=ref,event=pr
+          # Set latest tag for releases
+          type=raw,value=latest,enable={{is_default_branch}}
           # Set semver tags for releases
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=semver,pattern={{major}}
-          # Set unstable tag for main branch commits
+          # Set unstable tag for main branch commits (non-release)
           type=raw,value=unstable,enable={{is_default_branch}}
-          # Add commit SHA for traceability
-          type=sha,prefix={{branch}}-
         labels: |
           org.opencontainers.image.title=ONVIF Media Transcoder
           org.opencontainers.image.description=Docker-based ONVIF-compatible media transcoder with WS-Discovery
@@ -96,7 +95,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:unstable
         format: 'sarif'
         output: 'trivy-results.sarif'
 
