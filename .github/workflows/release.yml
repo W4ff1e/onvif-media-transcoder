@@ -1,0 +1,149 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Create as draft'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Validate version format
+      run: |
+        if [[ ! "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)*$ ]]; then
+          echo "Error: Version must follow semantic versioning (e.g., v1.0.0, v1.0.0-beta.1)"
+          exit 1
+        fi
+
+    - name: Check if tag exists
+      run: |
+        if git rev-parse "${{ github.event.inputs.version }}" >/dev/null 2>&1; then
+          echo "Error: Tag ${{ github.event.inputs.version }} already exists"
+          exit 1
+        fi
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get the last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        
+        if [ -z "$LAST_TAG" ]; then
+          # First release - get all commits
+          COMMITS=$(git log --oneline --pretty=format:"- %s" | head -20)
+          echo "## 🎉 Initial Release" > changelog.md
+          echo "" >> changelog.md
+          echo "This is the first release of ONVIF Media Transcoder!" >> changelog.md
+          echo "" >> changelog.md
+          echo "### ✨ Features" >> changelog.md
+          echo "- Universal input support for FFmpeg-compatible streams" >> changelog.md
+          echo "- Full ONVIF Profile S compatibility" >> changelog.md
+          echo "- Multi-protocol authentication (Basic, Digest, WS-Security)" >> changelog.md
+          echo "- Native WS-Discovery implementation" >> changelog.md
+          echo "- Professional streaming with H.264/AAC encoding" >> changelog.md
+          echo "- Docker containerization with MediaMTX integration" >> changelog.md
+          echo "" >> changelog.md
+          echo "### 🏗️ Architecture" >> changelog.md
+          echo "- MediaMTX RTSP server for reliable stream delivery" >> changelog.md
+          echo "- FFmpeg transcoder for real-time conversion" >> changelog.md
+          echo "- Native Rust ONVIF service implementation" >> changelog.md
+          echo "- Automatic network discovery via WS-Discovery" >> changelog.md
+        else
+          # Generate changelog since last tag
+          echo "## 🔄 Changes since $LAST_TAG" > changelog.md
+          echo "" >> changelog.md
+          
+          # Get commits since last tag and categorize them
+          git log $LAST_TAG..HEAD --oneline --pretty=format:"%s" | while read line; do
+            if echo "$line" | grep -qi "feat\|add\|new"; then
+              echo "### ✨ Features" >> changelog.md
+              git log $LAST_TAG..HEAD --oneline --pretty=format:"- %s" --grep="feat\|add\|new" -i >> changelog.md
+              echo "" >> changelog.md
+            elif echo "$line" | grep -qi "fix\|bug\|patch"; then
+              echo "### 🐛 Bug Fixes" >> changelog.md
+              git log $LAST_TAG..HEAD --oneline --pretty=format:"- %s" --grep="fix\|bug\|patch" -i >> changelog.md
+              echo "" >> changelog.md
+            elif echo "$line" | grep -qi "doc\|readme"; then
+              echo "### 📚 Documentation" >> changelog.md
+              git log $LAST_TAG..HEAD --oneline --pretty=format:"- %s" --grep="doc\|readme" -i >> changelog.md
+              echo "" >> changelog.md
+            fi
+          done
+          
+          # Add all other commits
+          echo "### 🔧 Other Changes" >> changelog.md
+          git log $LAST_TAG..HEAD --oneline --pretty=format:"- %s" >> changelog.md
+          echo "" >> changelog.md
+        fi
+        
+        # Add Docker information
+        echo "### 🐳 Docker Images" >> changelog.md
+        echo "" >> changelog.md
+        echo "This release is available on Docker Hub:" >> changelog.md
+        echo "" >> changelog.md
+        echo "\`\`\`bash" >> changelog.md
+        echo "# Pull the specific version" >> changelog.md
+        echo "docker pull w4ff1e/onvif-media-transcoder:${{ github.event.inputs.version }}" >> changelog.md
+        echo "" >> changelog.md
+        echo "# Or use the latest stable" >> changelog.md
+        echo "docker pull w4ff1e/onvif-media-transcoder:latest" >> changelog.md
+        echo "\`\`\`" >> changelog.md
+        echo "" >> changelog.md
+        echo "### ⚠️ Important Notes" >> changelog.md
+        echo "" >> changelog.md
+        echo "- This project contains AI-generated code and should be thoroughly tested before production use" >> changelog.md
+        echo "- For WS-Discovery functionality, use \`--network host\` when running with Docker" >> changelog.md
+        echo "- Default credentials are \`admin\` / \`onvif-rust\` (configurable via environment variables)" >> changelog.md
+        
+        # Output for GitHub Actions
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        cat changelog.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.event.inputs.version }}
+        release_name: Release ${{ github.event.inputs.version }}
+        body: ${{ steps.changelog.outputs.changelog }}
+        draft: ${{ github.event.inputs.draft }}
+        prerelease: ${{ github.event.inputs.prerelease }}
+        commitish: ${{ github.sha }}
+
+    - name: Summary
+      run: |
+        echo "## 🎉 Release Created Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Version:** ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Pre-release:** ${{ github.event.inputs.prerelease }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Draft:** ${{ github.event.inputs.draft }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "The Docker image will be automatically built and published to:" >> $GITHUB_STEP_SUMMARY
+        echo "- \`w4ff1e/onvif-media-transcoder:${{ github.event.inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- \`w4ff1e/onvif-media-transcoder:latest\` (if not pre-release)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🔗 [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ github.event.inputs.version }})" >> $GITHUB_STEP_SUMMARY

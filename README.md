@@ -40,6 +40,10 @@
     - [Building](#building)
     - [Configuration](#configuration)
     - [VS Code Integration](#vs-code-integration)
+  - [CI/CD and Releases](#cicd-and-releases)
+    - [Automated Docker Builds](#automated-docker-builds)
+    - [Creating Releases](#creating-releases)
+    - [Development Workflow](#development-workflow)
   - [Contributing](#contributing)
   - [License](#license)
   - [Authors](#authors)
@@ -84,11 +88,11 @@ cd onvif-media-transcoder
 ### Docker Run
 
 ```bash
-# Build the image
-docker build -t onvif-media-transcoder .
+# Pull the latest stable release from Docker Hub
+docker pull w4ff1e/onvif-media-transcoder:latest
 
 # Run with default demo stream (using host network for WS-Discovery)
-docker run --rm --network host onvif-media-transcoder
+docker run --rm --network host w4ff1e/onvif-media-transcoder:latest
 
 # Run with custom stream and credentials
 docker run --rm --network host \
@@ -96,13 +100,28 @@ docker run --rm --network host \
   -e DEVICE_NAME="My-Custom-Camera" \
   -e ONVIF_USERNAME="myuser" \
   -e ONVIF_PASSWORD="mypassword" \
-  onvif-media-transcoder
+  w4ff1e/onvif-media-transcoder:latest
 
 # Alternative: Run with port mapping (WS-Discovery may not work across networks)
 docker run --rm -p 8080:8080 -p 8554:8554 -p 3702:3702/udp \
   -e INPUT_URL="https://your-stream.m3u8" \
-  onvif-media-transcoder
+  w4ff1e/onvif-media-transcoder:latest
+
+# Run specific version
+docker run --rm --network host w4ff1e/onvif-media-transcoder:v1.0.0
+
+# Run unstable/development version (latest commit to main)
+docker run --rm --network host w4ff1e/onvif-media-transcoder:unstable
 ```
+
+### Available Docker Tags
+
+The project automatically publishes Docker images to Docker Hub with the following tags:
+
+- **`latest`** - Latest stable release
+- **`unstable`** - Latest commit to main branch (development builds)
+- **`v1.0.0`** - Specific version releases (semantic versioning)
+- **`main-<sha>`** - Specific commit builds for traceability
 
 ### Docker Compose
 
@@ -301,6 +320,47 @@ The project includes VS Code tasks and debugging configuration:
 - **Build**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Docker: Build Image"
 - **Run**: `Ctrl+Shift+P` → "Tasks: Run Task" → "Docker: Run Container (Test)"
 - **Debug**: F5 to start debugging with breakpoints
+
+## CI/CD and Releases
+
+### Automated Docker Builds
+
+The project uses GitHub Actions to automatically build and publish Docker images:
+
+- **Every commit to `main`**: Publishes `unstable` tag for development testing
+- **Tagged releases**: Publishes versioned tags (e.g., `v1.0.0`) and updates `latest`
+- **Multi-architecture**: Builds for both `linux/amd64` and `linux/arm64`
+- **Security scanning**: Automatic vulnerability scanning with Trivy
+- **Documentation sync**: Updates Docker Hub description from README
+
+### Creating Releases
+
+Releases are created through GitHub Actions workflow dispatch:
+
+1. Go to Actions → "Create Release" → "Run workflow"
+2. Specify version (e.g., `v1.0.0`) following semantic versioning
+3. Choose if it's a pre-release or draft
+4. The workflow automatically:
+   - Creates a Git tag
+   - Generates a changelog
+   - Creates a GitHub release
+   - Triggers Docker image build and publish
+
+### Development Workflow
+
+```bash
+# For contributors working on features
+git checkout -b feature/my-feature
+# ... make changes ...
+git push origin feature/my-feature
+# Create pull request - triggers CI tests
+
+# For maintainers creating releases
+# Use GitHub Actions "Create Release" workflow
+# Or manually tag and push:
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 Project structure:
 
