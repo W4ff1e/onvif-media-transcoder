@@ -95,8 +95,6 @@ jobs:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
           type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=semver,pattern={{major}}
           type=raw,value=latest
         labels: |
           org.opencontainers.image.title=ONVIF Media Transcoder
