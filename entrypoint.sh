@@ -309,28 +309,31 @@ start_ffmpeg_with_retry() {
     while [ $retry_count -lt $max_retries ]; do
         echo "FFmpeg attempt $((retry_count + 1)) of $max_retries..."
         
-        # Start FFmpeg with WiFi-optimized settings
-        # Lower bitrates and better error resilience for wireless networks
+        # Start FFmpeg with UniFi Protect optimized settings
+        # Input: 480x270, Output: Scaled appropriately, No audio
         ffmpeg \
             -re \
             -rw_timeout 10000000 \
             -i "${INPUT_URL}" \
             -c:v libx264 \
-            -preset veryfast \
+            -preset medium \
             -tune zerolatency \
-            -profile:v baseline \
-            -level 3.1 \
+            -profile:v main \
+            -level 4.1 \
             -pix_fmt yuv420p \
-            -g 30 \
-            -keyint_min 30 \
+            -colorspace bt709 \
+            -color_primaries bt709 \
+            -color_trc bt709 \
+            -vf "scale=960:540:flags=lanczos" \
+            -g 15 \
+            -keyint_min 15 \
             -sc_threshold 0 \
-            -b:v 1M \
-            -maxrate 1.5M \
-            -bufsize 3M \
-            -c:a aac \
-            -b:a 96k \
-            -ar 44100 \
-            -ac 2 \
+            -b:v 1500k \
+            -maxrate 2M \
+            -bufsize 4M \
+            -refs 1 \
+            -x264opts "nal-hrd=cbr:force-cfr=1" \
+            -an \
             -f rtsp \
             -rtsp_transport tcp \
             -timeout 10000000 \

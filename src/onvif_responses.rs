@@ -147,25 +147,26 @@ pub fn get_profiles_response() -> String {
 <tt:Name>VideoSourceConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="1920" height="1080"/>
+<tt:Bounds x="0" y="0" width="960" height="540"/>
 </tt:VideoSourceConfiguration>
 <tt:VideoEncoderConfiguration token="VideoEncoderConfig_HQ">
 <tt:Name>VideoEncoderConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:Encoding>H264</tt:Encoding>
 <tt:Resolution>
-<tt:Width>1920</tt:Width>
-<tt:Height>1080</tt:Height>
+<tt:Width>960</tt:Width>
+<tt:Height>540</tt:Height>
 </tt:Resolution>
-<tt:Quality>5</tt:Quality>
+<tt:Quality>4</tt:Quality>
 <tt:RateControl>
 <tt:FrameRateLimit>30</tt:FrameRateLimit>
 <tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>8000</tt:BitrateLimit>
+<tt:BitrateLimit>1500</tt:BitrateLimit>
 </tt:RateControl>
 <tt:H264>
 <tt:GovLength>30</tt:GovLength>
 <tt:H264Profile>Main</tt:H264Profile>
+<tt:Level>4.1</tt:Level>
 </tt:H264>
 <tt:Multicast>
 <tt:Address>
@@ -207,25 +208,26 @@ pub fn get_profiles_response() -> String {
 <tt:Name>VideoSourceConfig_LQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="640" height="360"/>
+<tt:Bounds x="0" y="0" width="960" height="540"/>
 </tt:VideoSourceConfiguration>
 <tt:VideoEncoderConfiguration token="VideoEncoderConfig_LQ">
 <tt:Name>VideoEncoderConfig_LQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
 <tt:Encoding>H264</tt:Encoding>
 <tt:Resolution>
-<tt:Width>640</tt:Width>
-<tt:Height>360</tt:Height>
+<tt:Width>960</tt:Width>
+<tt:Height>540</tt:Height>
 </tt:Resolution>
-<tt:Quality>3</tt:Quality>
+<tt:Quality>4</tt:Quality>
 <tt:RateControl>
-<tt:FrameRateLimit>15</tt:FrameRateLimit>
+<tt:FrameRateLimit>30</tt:FrameRateLimit>
 <tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>1000</tt:BitrateLimit>
+<tt:BitrateLimit>1500</tt:BitrateLimit>
 </tt:RateControl>
 <tt:H264>
 <tt:GovLength>15</tt:GovLength>
 <tt:H264Profile>Baseline</tt:H264Profile>
+<tt:Level>3.1</tt:Level>
 </tt:H264>
 <tt:Multicast>
 <tt:Address>
@@ -376,15 +378,16 @@ pub fn get_video_encoder_configurations_response() -> String {
 <tt:Width>1920</tt:Width>
 <tt:Height>1080</tt:Height>
 </tt:Resolution>
-<tt:Quality>5</tt:Quality>
+<tt:Quality>4</tt:Quality>
 <tt:RateControl>
 <tt:FrameRateLimit>30</tt:FrameRateLimit>
 <tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>8000</tt:BitrateLimit>
+<tt:BitrateLimit>2000</tt:BitrateLimit>
 </tt:RateControl>
 <tt:H264>
 <tt:GovLength>30</tt:GovLength>
 <tt:H264Profile>Main</tt:H264Profile>
+<tt:Level>4.1</tt:Level>
 </tt:H264>
 <tt:Multicast>
 <tt:Address>
@@ -414,6 +417,7 @@ pub fn get_video_encoder_configurations_response() -> String {
 <tt:H264>
 <tt:GovLength>15</tt:GovLength>
 <tt:H264Profile>Baseline</tt:H264Profile>
+<tt:Level>3.1</tt:Level>
 </tt:H264>
 <tt:Multicast>
 <tt:Address>

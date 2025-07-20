@@ -1,4 +1,4 @@
-# MediaMTX configuration optimized for WiFi streaming
+# MediaMTX configuration optimized for UniFi Protect compatibility
 
 # Logging
 logLevel: info
@@ -7,16 +7,19 @@ logDestinations: [stdout]
 # RTSP server configuration
 rtspAddress: :RTSP_PORT_PLACEHOLDER
 
-# Network optimizations for WiFi
-writeQueueSize: 512
-udpMaxPayloadSize: 1472
+# Network optimizations for UniFi Protect
+writeQueueSize: 1024
+udpMaxPayloadSize: 1200
+readTimeout: 10s
+writeTimeout: 10s
 
-# RTSP-specific optimizations
+# RTSP-specific optimizations for UniFi Protect
 rtsp: true
 rtspEncryption: "no"
-rtspServerKey: ""
-rtspServerCert: ""
 rtspAuthMethods: ["basic"]
+
+# Improve stream handling for UniFi compatibility
+# protocols: [tcp]
 
 # Stream path configuration
 paths:
