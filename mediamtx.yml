@@ -24,4 +24,5 @@ rtspAuthMethods: ["basic"]
 # Stream path configuration
 paths:
   STREAM_PATH_PLACEHOLDER:
-    source: publisher
+    source: SOURCE_PLACEHOLDER
+    record: false

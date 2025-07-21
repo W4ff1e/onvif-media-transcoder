@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/app/target \
 FROM alpine:latest
 
 # Install runtime dependencies
-RUN apk add --no-cache ffmpeg curl
+RUN apk add --no-cache curl
 
 # Download and install MediaMTX
 RUN curl -L https://github.com/bluenviron/mediamtx/releases/download/v1.13.0/mediamtx_v1.13.0_linux_amd64.tar.gz \
@@ -58,6 +58,7 @@ ENV ONVIF_PORT="8080"
 ENV DEVICE_NAME="ONVIF-Media-Transcoder"
 ENV ONVIF_USERNAME="admin"
 ENV ONVIF_PASSWORD="onvif-rust"
+ENV WS_DISCOVERY_ENABLED="true"
 
 # Expose the ports (TCP for ONVIF, UDP for WS-Discovery)
 EXPOSE 8080 8554 3702/udp
