@@ -55,6 +55,15 @@ jobs:
           org.opencontainers.image.documentation=https://github.com/W4ff1e/onvif-media-transcoder/blob/main/README.md
           org.opencontainers.image.licenses=MIT
 
+    - name: Generate cache key for Docker build
+      id: docker_cache_key_unstable
+      run: |
+        # Generate a hash of files that invalidate the Docker build cache for Rust projects
+        # This includes Dockerfile, Cargo.toml, and Cargo.lock
+        cache_key=$(find Dockerfile Cargo.toml Cargo.lock -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
+        echo "DOCKER_CACHE_KEY_UNSTABLE=$cache_key" >> $GITHUB_ENV
+        echo "Generated Docker Cache Key (Unstable): $cache_key"
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
@@ -63,8 +72,8 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=${{ steps.docker_cache_key_unstable.outputs.DOCKER_CACHE_KEY_UNSTABLE }}
+        cache-to: type=gha,mode=max,scope=${{ steps.docker_cache_key_unstable.outputs.DOCKER_CACHE_KEY_UNSTABLE }}
 
   build-release:
     name: Build and Push Release
@@ -116,6 +125,14 @@ jobs:
           org.opencontainers.image.documentation=https://github.com/W4ff1e/onvif-media-transcoder/blob/main/README.md
           org.opencontainers.image.licenses=MIT
 
+    - name: Generate cache key for Docker build
+      id: docker_cache_key_release
+      run: |
+        # Generate a hash of files that invalidate the Docker build cache for Rust projects
+        cache_key=$(find Dockerfile Cargo.toml Cargo.lock -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
+        echo "DOCKER_CACHE_KEY_RELEASE=$cache_key" >> $GITHUB_ENV
+        echo "Generated Docker Cache Key (Release): $cache_key"
+
     - name: Build and push Docker image
       id: build
       uses: docker/build-push-action@v5
@@ -125,8 +142,8 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=${{ env.DOCKER_CACHE_KEY_RELEASE }}
+        cache-to: type=gha,mode=max,scope=${{ env.DOCKER_CACHE_KEY_RELEASE }}
         build-args: |
           BUILDTIME=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
           VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
@@ -146,15 +163,24 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Generate cache key for Docker build
+      id: docker_cache_key_pr
+      run: |
+        # Generate a hash of files that invalidate the Docker build cache for Rust projects
+        cache_key=$(find Dockerfile Cargo.toml Cargo.lock -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
+        echo "DOCKER_CACHE_KEY_PR=$cache_key" >> $GITHUB_ENV
+        echo "Generated Docker Cache Key (PR): $cache_key"
+
     - name: Build Docker image (no push)
       uses: docker/build-push-action@v5
       with:
         context: .
         platforms: linux/amd64,linux/arm64
         push: false
+        load: false
         tags: onvif-media-transcoder:test
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: type=gha,scope=${{ env.DOCKER_CACHE_KEY_PR }}
+        cache-to: type=gha,mode=max,scope=${{ env.DOCKER_CACHE_KEY_PR }}
 
   security-scan:
     runs-on: ubuntu-latest

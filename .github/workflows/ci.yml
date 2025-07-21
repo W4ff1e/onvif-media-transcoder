@@ -80,6 +80,7 @@ jobs:
           -e DEVICE_NAME="Test-Camera" \
           -e ONVIF_USERNAME="admin" \
           -e ONVIF_PASSWORD="test123" \
+          -e WS_DISCOVERY_ENABLED="true" \
           -p 8080:8080 \
           onvif-media-transcoder:test
 

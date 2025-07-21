@@ -16,9 +16,9 @@
 
 ## Overview
 
-**ONVIF Media Transcoder** is a Docker-based solution that converts any input stream (HLS, MP4, RTSP, etc.)
-into a fully ONVIF-compatible camera device. It provides automatic network discovery, standardized media
-profiles, and authentication-protected endpoints for seamless integration with ONVIF clients.
+**ONVIF Media Transcoder** is a Docker-based solution that re-muxes input streams (HLS, MP4, RTSP, etc.)
+into ONVIF-compatible camera devices. It provides network discovery, media profiles, and authentication
+endpoints for integration with ONVIF clients.
 
 ## Table of Contents
 
@@ -52,7 +52,6 @@ profiles, and authentication-protected endpoints for seamless integration with O
     - [VS Code Integration](#vs-code-integration)
   - [CI/CD and Releases](#cicd-and-releases)
     - [Automated Docker Builds](#automated-docker-builds)
-    - [Creating Releases](#creating-releases)
     - [Development Workflow](#development-workflow)
   - [Contributing](#contributing)
   - [Security](#security)
@@ -64,25 +63,25 @@ profiles, and authentication-protected endpoints for seamless integration with O
 
 ## Features
 
-- [x] **Universal Input Support**: Convert any FFmpeg-compatible input (HLS, MP4, RTSP, HTTP streams)
-- [x] **ONVIF Compliance**: Full ONVIF Profile S compatibility with standardized endpoints
-- [x] **Network Discovery**: Native WS-Discovery implementation for automatic device detection
-- [x] **Multi-Protocol Authentication**: HTTP Basic, HTTP Digest, and WS-Security support
-- [x] **Professional Streaming**:
-  - H.264/AAC encoding with optimized settings
-  - RTSP over TCP for reliable delivery
-  - Real-time transcoding with low latency
-- [x] **Production Features**:
-  - Comprehensive error handling and logging
-  - Graceful service recovery and health monitoring
-  - Container orchestration with MediaMTX integration
-  - Configurable authentication and security settings
+- [x] **Input Stream Support**: Re-mux MediaMTX-compatible input (HLS, MP4, RTSP, HTTP streams)
+- [x] **ONVIF Compliance**: ONVIF Profile S compatibility with standard endpoints
+- [x] **Network Discovery**: WS-Discovery implementation for device detection
+- [x] **Authentication**: HTTP Basic, HTTP Digest, and WS-Security support
+- [x] **Stream Re-muxing**:
+  - Direct stream re-muxing without re-encoding
+  - RTSP delivery over TCP
+  - Minimal latency processing
+- [x] **Container Features**:
+  - Error handling and logging
+  - Service recovery and monitoring
+  - MediaMTX integration
+  - Configurable authentication
 
 ## Quick Start
 
 ### Quick Start Script
 
-For the fastest setup, use the included quick-start script:
+Use the included quick-start script for setup:
 
 ```bash
 # Clone and setup
@@ -95,14 +94,14 @@ cd onvif-media-transcoder
 # Build and run with one command
 ./scripts/quick-start.sh run
 
-# Or use Docker Compose (recommended)
+# Or use Docker Compose
 ./scripts/quick-start.sh compose
 ```
 
 ### Docker Run
 
 ```bash
-# Pull the latest stable release from Docker Hub
+# Pull the latest release from Docker Hub
 docker pull w4ff1e/onvif-media-transcoder:latest
 
 # Run with default demo stream (using host network for WS-Discovery)
@@ -130,15 +129,15 @@ docker run --rm --network host w4ff1e/onvif-media-transcoder:unstable
 
 ### Available Docker Tags
 
-The project automatically publishes Docker images to Docker Hub with the following tags:
+The project publishes Docker images to Docker Hub with the following tags:
 
 - **`latest`** - Latest stable release
-- **`unstable`** - Latest commit to main branch (development builds)
-- **`v0.10.0`** - Specific version releases (semantic versioning)
+- **`unstable`** - Latest commit to main branch
+- **`v0.10.0`** - Specific version releases
 
 ### Docker Compose
 
-For easier deployment and configuration, use the provided Docker Compose examples:
+Use the provided Docker Compose examples for deployment:
 
 ```bash
 # Start with default configuration
@@ -168,32 +167,31 @@ docker-compose -f examples/docker-compose.yml down
 | `ONVIF_USERNAME`   | `admin`                  | ONVIF authentication username |
 | `ONVIF_PASSWORD`   | `onvif-rust`             | ONVIF authentication password |
 
-**Note**: The transcoder automatically detects the container IP and configures all services accordingly.
+**Note**: The service automatically detects the container IP and configures all services accordingly.
 
-**Network Requirements**: For optimal WS-Discovery functionality, use `--network host` when running with Docker.
-This allows the multicast discovery protocol to work properly across network boundaries. Port mapping (`-p`)
-can be used as an alternative but may limit discovery functionality in some network configurations.
+**Network Requirements**: For WS-Discovery functionality, use `--network host` when running with Docker.
+This allows the multicast discovery protocol to work across network boundaries. Port mapping (`-p`)
+can be used as an alternative but may limit discovery functionality.
 
 ## Architecture
 
-The transcoder consists of four integrated components working together to provide ONVIF-compatible streaming:
+The service consists of three components working together to provide ONVIF-compatible streaming:
 
-1. **ONVIF Service (Rust)**: Core ONVIF SOAP web service providing device management and media profiles
-2. **WS-Discovery Service (Rust)**: Network discovery service for automatic device detection via multicast
-3. **FFmpeg Transcoder**: Real-time stream conversion with H.264/AAC encoding optimization
-4. **MediaMTX RTSP Server**: Professional RTSP server for reliable stream delivery to ONVIF clients
+1. **ONVIF Service (Rust)**: ONVIF SOAP web service providing device management and media profiles
+2. **WS-Discovery Service (Rust)**: Network discovery service for device detection via multicast
+3. **MediaMTX**: Stream re-muxing and RTSP server for stream delivery to ONVIF clients
 
 ```text
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Input Stream  │──▶│     FFmpeg      │──▶│    MediaMTX     │
-│  (HLS/MP4/etc)  │    │   Transcoder    │    │   RTSP Server   │
-└─────────────────┘    └─────────────────┘    └────────┬────────┘
-                                                       │
-                                                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  ONVIF Clients  │◀──│  ONVIF Service  │◀──│  RTSP Stream    │
-│                 │    │   (Port 8080)   │    │   (Port 8554)   │
-└────────┬────────┘    └────────┬────────┘    └─────────────────┘
+┌─────────────────┐    ┌─────────────────┐
+│   Input Stream  │──▶│    MediaMTX     │
+│  (HLS/MP4/etc)  │    │ Re-mux & RTSP   │
+└─────────────────┘    └────────┬────────┘
+                                │
+                                ▼
+┌─────────────────┐    ┌─────────────────┐
+│  ONVIF Clients  │◀──│  ONVIF Service  │
+│                 │    │   (Port 8080)   │
+└────────┬────────┘    └────────┬────────┘
          │                      │
          ▼                      ▲
 ┌─────────────────┐    ┌─────────────────┐
@@ -204,9 +202,9 @@ The transcoder consists of four integrated components working together to provid
 
 **Data Flow:**
 
-- **Stream Processing**: Input streams are transcoded by FFmpeg and served via MediaMTX RTSP server
+- **Stream Processing**: Input streams are re-muxed by MediaMTX and served via RTSP (port configurable via `RTSP_OUTPUT_PORT`)
 - **Device Discovery**: WS-Discovery broadcasts device availability on the network
-- **ONVIF Integration**: ONVIF service provides standardized endpoints and references the RTSP stream
+- **ONVIF Integration**: ONVIF service provides standard endpoints and references the RTSP stream
 - **Client Access**: ONVIF clients discover the device and access media streams through standard protocols
 
 ## ONVIF Compatibility
@@ -240,7 +238,7 @@ The transcoder consists of four integrated components working together to provid
 
 ### Discovery
 
-- **WS-Discovery Protocol**: Standards-compliant device discovery
+- **WS-Discovery Protocol**: Standard device discovery protocol
 - **Device Type**: `NetworkVideoTransmitter`
 - **ONVIF Profile**: Streaming profile compliant
 - **Multicast**: `239.255.255.250:3702` (UDP port 3702)
@@ -249,10 +247,10 @@ The transcoder consists of four integrated components working together to provid
 
 ### ONVIF Clients
 
-Test with popular ONVIF-compatible applications:
+Test with ONVIF-compatible applications:
 
-- **ONVIF Device Manager** - Full device discovery and configuration
-- **VLC Media Player** - Network stream playback: `rtsp://host:8554/stream`
+- **ONVIF Device Manager** - Device discovery and configuration
+- **ffplay** - Network stream playback: `ffplay rtsp://host:8554/stream`
 - **FFprobe** - Stream analysis: `ffprobe rtsp://host:8554/stream`
 
 ### Manual Testing
@@ -312,8 +310,8 @@ If authentication is failing:
 If experiencing stream lag or quality issues:
 
 1. **Input Stream**: Verify the input stream is stable and accessible
-2. **Network Bandwidth**: Ensure sufficient bandwidth for transcoding
-3. **Hardware Resources**: Monitor CPU usage during transcoding
+2. **Network Bandwidth**: Ensure sufficient bandwidth for re-muxing
+3. **Hardware Resources**: Monitor CPU usage during stream processing
 4. **Container Resources**: Increase Docker memory/CPU limits if needed
 
 ## Development
@@ -322,7 +320,7 @@ If experiencing stream lag or quality issues:
 
 - [Docker](https://www.docker.com/get-started) for containerization
 - [Rust](https://www.rust-lang.org/tools/install) 1.70 or later (for local development)
-- [VS Code](https://code.visualstudio.com/) with Rust extensions (recommended)
+- [VS Code](https://code.visualstudio.com/) with Rust extensions
 
 ### Building
 
@@ -371,26 +369,15 @@ For local development without Docker, see [**Local Development Guide**](docs/LOC
 
 ### Automated Docker Builds
 
-The project uses GitHub Actions to automatically build and publish Docker images:
+The project uses GitHub Actions to build and publish Docker images:
 
-- **Every commit to `main`**: Publishes `unstable` tag for development testing
+- **Every commit to `main`**: Publishes `unstable` tag
 - **Tagged releases**: Publishes versioned tags (e.g., `v1.0.0`) and updates `latest`
 - **Multi-architecture**: Builds for both `linux/amd64` and `linux/arm64`
-- **Security scanning**: Automatic vulnerability scanning with Trivy
+- **Security scanning**: Vulnerability scanning with CodeQL and Trivy
 - **Documentation sync**: Updates Docker Hub description from README
 
-### Creating Releases
-
-Releases are created through GitHub Actions workflow dispatch:
-
-1. Go to Actions → "Create Release" → "Run workflow"
-2. Specify version (e.g., `v1.0.0`) following semantic versioning
-3. Choose if it's a pre-release or draft
-4. The workflow automatically:
-   - Creates a Git tag
-   - Generates a changelog
-   - Creates a GitHub release
-   - Triggers Docker image build and publish
+> Note: The Multi-architecture builds are currently untested and may not work on anything except x86_64 Linux systems.
 
 ### Development Workflow
 
@@ -437,13 +424,13 @@ Project structure:
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an
 issue first to discuss what you would like to change.
 
-**Code Quality Guidelines:**
+**Code Guidelines:**
 
 - This project uses AI-assisted development with GitHub Copilot
-- All contributions should be reviewed and tested thoroughly before merging
-- Please ensure proper error handling and documentation
-- Follow existing code patterns and style conventions
-- Add appropriate tests and update documentation as needed
+- All contributions should be reviewed and tested before merging
+- Ensure proper error handling and documentation
+- Follow existing code patterns and style
+- Add tests and update documentation as needed
 
 Please make sure to update tests as appropriate and follow the existing code style.
 
@@ -454,13 +441,13 @@ services and authentication mechanisms.
 
 ### Important Security Notice
 
-⚠️ This project contains AI-generated code and should undergo thorough security review before production deployment.
+⚠️ This project contains AI-generated code and should undergo security review before production deployment.
 
 ### Key Security Considerations
 
 - **Default Credentials**: Change the default `admin`/`onvif-rust` credentials in production
 - **Network Exposure**: Multiple services (ONVIF, RTSP, WS-Discovery) are exposed by default
-- **Authentication**: Supports multiple methods including WS-Security for enterprise compatibility
+- **Authentication**: Supports multiple methods including WS-Security
 - **Container Security**: Regular vulnerability scanning and security updates
 
 ### Reporting Security Issues
@@ -468,10 +455,9 @@ services and authentication mechanisms.
 Please report security vulnerabilities responsibly:
 
 - Use [GitHub Security Advisories](https://github.com/W4ff1e/onvif-media-transcoder/security/advisories)
-- Email: [security@throud.org](mailto:security@throud.org)
 
 For detailed security information, deployment best practices, and vulnerability reporting procedures,
-see our [**Security Policy**](SECURITY.md).
+see the [**Security Policy**](SECURITY.md).
 
 ## License
 
