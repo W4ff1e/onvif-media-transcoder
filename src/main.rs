@@ -22,6 +22,7 @@ struct Config {
     onvif_username: String,
     onvif_password: String,
     container_ip: String,
+    ws_discovery_enabled: bool,
 }
 
 impl Config {
@@ -54,6 +55,17 @@ impl Config {
             onvif_password.len()
         );
 
+        println!("Reading WS_DISCOVERY_ENABLED environment variable...");
+        let ws_discovery_enabled = std::env::var("WS_DISCOVERY_ENABLED")
+            .map_err(|_| "WS_DISCOVERY_ENABLED environment variable must be set")?
+            == "true";
+
+        if ws_discovery_enabled {
+            println!("WS-Discovery: ENABLED");
+        } else {
+            println!("WS-Discovery: DISABLED");
+        }
+
         // Validate port number
         println!("Validating port number...");
         let _: u16 = onvif_port
@@ -82,6 +94,7 @@ impl Config {
             onvif_username,
             onvif_password,
             container_ip,
+            ws_discovery_enabled,
         })
     }
 
@@ -93,6 +106,14 @@ impl Config {
         println!("  ONVIF Username: {}", self.onvif_username);
         println!("  ONVIF Password: [HIDDEN]");
         println!("  Container IP: {}", self.container_ip);
+        println!(
+            "  WS-Discovery: {}",
+            if self.ws_discovery_enabled {
+                "ENABLED"
+            } else {
+                "DISABLED"
+            }
+        );
     }
 }
 
@@ -133,14 +154,21 @@ fn main() {
     config.display();
 
     // Start WS-Discovery server in a separate thread
-    println!("Initializing WS-Discovery server...");
-    if let Err(e) = start_ws_discovery_server(&config) {
-        eprintln!("Failed to start WS-Discovery server: {e}");
-        println!(
-            "Continuing without WS-Discovery (ONVIF service will still work for direct connections)"
-        );
+    if config.ws_discovery_enabled {
+        println!("Initializing WS-Discovery server...");
+        if let Err(e) = start_ws_discovery_server(&config) {
+            eprintln!("Failed to start WS-Discovery server: {e}");
+            println!(
+                "Continuing without WS-Discovery (ONVIF service will still work for direct connections)"
+            );
+        } else {
+            println!("WS-Discovery server initialization completed");
+        }
     } else {
-        println!("WS-Discovery server initialization completed");
+        println!("WS-Discovery is disabled - skipping WS-Discovery server initialization");
+        println!(
+            "Device discovery will not be available, but ONVIF service will work for direct connections"
+        );
     }
 
     // Start ONVIF web service (this will block)
@@ -290,7 +318,11 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
 
     println!("Successfully bound to {bind_addr}");
     println!("ONVIF Camera service running on port {}", config.onvif_port);
-    println!("Device discovery available via WS-Discovery");
+    if config.ws_discovery_enabled {
+        println!("Device discovery available via WS-Discovery");
+    } else {
+        println!("Device discovery disabled (WS-Discovery is off)");
+    }
     println!("Stream URI: {}", config.rtsp_stream_url);
 
     // Add a keepalive mechanism to detect if the service is still running
