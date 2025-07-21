@@ -82,7 +82,19 @@ jobs:
           -e ONVIF_PASSWORD="test123" \
           -e WS_DISCOVERY_ENABLED="true" \
           -p 8080:8080 \
+          -p 8554:8554 \
+          -p 3702:3702/udp \
           onvif-media-transcoder:test
+
+        # Give the container a moment to start
+        sleep 5
+
+        # Check if container is still running
+        if ! docker ps | grep test-container; then
+          echo "Container died immediately, showing logs:"
+          docker logs test-container
+          exit 1
+        fi
 
         # Wait for service to start with health check
         echo "Waiting for ONVIF service to start..."
@@ -96,6 +108,16 @@ jobs:
             docker logs test-container
             exit 1
           fi
+          
+          # Check if container is still running every few attempts
+          if [ $((i % 5)) -eq 0 ]; then
+            if ! docker ps | grep test-container; then
+              echo "Container died during startup (attempt $i), showing logs:"
+              docker logs test-container
+              exit 1
+            fi
+          fi
+          
           echo "Attempt $i/30: ONVIF service not ready yet, waiting..."
           sleep 10
         done
