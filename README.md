@@ -227,6 +227,11 @@ The transcoder consists of four integrated components working together to provid
 
 ### Authentication
 
+> ⚠️ **Warning**: The authentication implementation in this project is custom-built
+> and has not undergone extensive security review or battle testing.
+> Use with caution—**it is strongly recommended to restrict access at the network level**
+> and not expose the service directly to untrusted networks or the public internet.
+
 - **Supported Methods**: HTTP Basic Authentication, HTTP Digest Authentication, WS-Security (PasswordDigest/PasswordText)
 - **Default Credentials**: `admin` / `onvif-rust`
 - **Security**: Device discovery endpoints allow unauthenticated access for ONVIF compliance
