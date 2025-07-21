@@ -16,7 +16,7 @@ use ws_discovery::{DeviceInfo, WSDiscoveryServer, get_default_interface_ip};
 /// Configuration structure for the ONVIF Media Transcoder
 #[derive(Debug, Clone)]
 struct Config {
-    rtsp_input: String,
+    rtsp_stream_url: String,
     onvif_port: String,
     device_name: String,
     onvif_username: String,
@@ -26,10 +26,10 @@ struct Config {
 
 impl Config {
     fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
-        println!("Reading RTSP_INPUT environment variable...");
-        let rtsp_input = std::env::var("RTSP_INPUT")
-            .map_err(|_| "RTSP_INPUT environment variable must be set")?;
-        println!("RTSP_INPUT: {rtsp_input}");
+        println!("Reading rtsp_stream_url environment variable...");
+        let rtsp_stream_url = std::env::var("rtsp_stream_url")
+            .map_err(|_| "rtsp_stream_url environment variable must be set")?;
+        println!("rtsp_stream_url: {rtsp_stream_url}");
 
         println!("Reading ONVIF_PORT environment variable...");
         let onvif_port = std::env::var("ONVIF_PORT")
@@ -76,7 +76,7 @@ impl Config {
 
         println!("Configuration creation completed successfully");
         Ok(Config {
-            rtsp_input,
+            rtsp_stream_url: rtsp_stream_url,
             onvif_port,
             device_name,
             onvif_username,
@@ -87,7 +87,7 @@ impl Config {
 
     fn display(&self) {
         println!("Configuration:");
-        println!("  RTSP Input Stream: {}", self.rtsp_input);
+        println!("  RTSP Input Stream: {}", self.rtsp_stream_url);
         println!("  ONVIF Port: {}", self.onvif_port);
         println!("  Device Name: {}", self.device_name);
         println!("  ONVIF Username: {}", self.onvif_username);
@@ -253,7 +253,7 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
 
 fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting ONVIF web service on port {}", config.onvif_port);
-    println!("Exposing RTSP stream: {}", config.rtsp_input);
+    println!("Exposing RTSP stream: {}", config.rtsp_stream_url);
     println!("Device Name: {}", config.device_name);
     println!("Authentication: {} / [HIDDEN]", config.onvif_username);
     println!("WS-Discovery device discovery is running");
@@ -291,7 +291,7 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
     println!("Successfully bound to {bind_addr}");
     println!("ONVIF Camera service running on port {}", config.onvif_port);
     println!("Device discovery available via WS-Discovery");
-    println!("Stream URI: {}", config.rtsp_input);
+    println!("Stream URI: {}", config.rtsp_stream_url);
 
     // Add a keepalive mechanism to detect if the service is still running
     let mut connection_count = 0u64;
@@ -476,7 +476,7 @@ fn handle_onvif_request(
         println!("Handling supported endpoint: GetCapabilities");
         send_capabilities_response(
             &mut stream,
-            &config.rtsp_input,
+            &config.rtsp_stream_url,
             &config.container_ip,
             &config.onvif_port,
         )?;
@@ -488,10 +488,10 @@ fn handle_onvif_request(
         send_system_date_time_response(&mut stream)?;
     } else if request.contains("GetProfiles") {
         println!("Handling supported endpoint: GetProfiles");
-        send_profiles_response(&mut stream, &config.rtsp_input)?;
+        send_profiles_response(&mut stream, &config.rtsp_stream_url)?;
     } else if request.contains("GetStreamUri") {
         println!("Handling supported endpoint: GetStreamUri");
-        send_stream_uri_response(&mut stream, &config.rtsp_input)?;
+        send_stream_uri_response(&mut stream, &config.rtsp_stream_url)?;
     } else if request.contains("GetSnapshotUri") {
         println!("Handling supported endpoint: GetSnapshotUri");
         send_snapshot_uri_response(&mut stream, &config.container_ip, &config.onvif_port)?;
@@ -1206,7 +1206,7 @@ mod tests {
     fn test_config_from_env() {
         // Save original environment
         let original_vars: Vec<_> = [
-            "RTSP_INPUT",
+            "rtsp_stream_url",
             "ONVIF_PORT",
             "DEVICE_NAME",
             "ONVIF_USERNAME",
@@ -1218,7 +1218,7 @@ mod tests {
 
         // Set test environment variables
         unsafe {
-            std::env::set_var("RTSP_INPUT", "rtsp://test:8554/stream");
+            std::env::set_var("rtsp_stream_url", "rtsp://test:8554/stream");
             std::env::set_var("ONVIF_PORT", "8080");
             std::env::set_var("DEVICE_NAME", "Test-Camera");
             std::env::set_var("ONVIF_USERNAME", "testuser");
@@ -1230,7 +1230,7 @@ mod tests {
         assert!(config.is_ok());
 
         let config = config.unwrap();
-        assert_eq!(config.rtsp_input, "rtsp://test:8554/stream");
+        assert_eq!(config.rtsp_stream_url, "rtsp://test:8554/stream");
         assert_eq!(config.onvif_port, "8080");
         assert_eq!(config.device_name, "Test-Camera");
         assert_eq!(config.onvif_username, "testuser");
@@ -1245,7 +1245,7 @@ mod tests {
 
         // Test missing environment variable
         unsafe {
-            std::env::remove_var("RTSP_INPUT");
+            std::env::remove_var("rtsp_stream_url");
         }
         let config = Config::from_env();
         assert!(config.is_err());

@@ -144,7 +144,7 @@ echo "  ONVIF Username: ${ONVIF_USERNAME}"
 echo "  ONVIF Password: [HIDDEN]"
 
 # Export environment variables for Rust application
-export RTSP_INPUT="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
+export RTSP_STREAM_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 export ONVIF_PORT="${ONVIF_PORT}"
 export DEVICE_NAME="${DEVICE_NAME}"
 export ONVIF_USERNAME="${ONVIF_USERNAME}"
