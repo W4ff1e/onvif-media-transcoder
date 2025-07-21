@@ -2,7 +2,9 @@ use base64::{Engine as _, engine::general_purpose};
 use sha1::Digest;
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
+use std::process::{Command, Stdio};
 use std::thread;
+use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 mod onvif_endpoints;
@@ -27,10 +29,10 @@ struct Config {
 
 impl Config {
     fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
-        println!("Reading rtsp_stream_url environment variable...");
-        let rtsp_stream_url = std::env::var("rtsp_stream_url")
-            .map_err(|_| "rtsp_stream_url environment variable must be set")?;
-        println!("rtsp_stream_url: {rtsp_stream_url}");
+        println!("Reading RTSP_STREAM_URL environment variable...");
+        let rtsp_stream_url = std::env::var("RTSP_STREAM_URL")
+            .map_err(|_| "RTSP_STREAM_URL environment variable must be set")?;
+        println!("RTSP_STREAM_URL: {rtsp_stream_url}");
 
         println!("Reading ONVIF_PORT environment variable...");
         let onvif_port = std::env::var("ONVIF_PORT")
@@ -432,8 +434,27 @@ fn handle_onvif_request(
     let first_line = request.lines().next().unwrap_or("Unknown");
     println!("Received ONVIF request: {first_line}");
 
+    // Check if this is a GET request for snapshot
+    if first_line.starts_with("GET /snapshot.jpg") {
+        println!("Handling snapshot request");
+
+        // Snapshot endpoints require authentication as per ONVIF standards
+        if !is_authenticated(&request, &config.onvif_username, &config.onvif_password) {
+            println!("  Snapshot request - authentication required");
+            send_auth_required_response(&mut stream)?;
+            return Ok(());
+        }
+
+        println!("  Snapshot request - authentication successful");
+        return handle_snapshot_request(&mut stream, config);
+    }
+
     // Debug: Check if we have SOAP content
-    if request.contains("Envelope") && (request.contains("soap:") || request.contains("v:")) {
+    if request.contains("Envelope")
+        && (request.contains("soap:") || request.contains("v:") || request.contains("s:"))
+    {
+        println!("  Contains SOAP envelope - valid ONVIF request");
+    } else if request.contains(":Envelope") || request.contains("<Envelope") {
         println!("  Contains SOAP envelope - valid ONVIF request");
     } else {
         println!("  No SOAP envelope detected - possibly incomplete request");
@@ -489,7 +510,11 @@ fn handle_onvif_request(
         println!("  Authentication required - sending 401 response");
 
         // Check if this is a SOAP request that might benefit from WS-Security auth
-        if request.contains("soap:Envelope") || request.contains("<soap:") {
+        if request.contains("soap:Envelope")
+            || request.contains("s:Envelope")
+            || request.contains(":Envelope")
+            || request.contains("<soap:")
+        {
             println!("  Detected SOAP request - sending WS-Security auth fault");
             send_ws_security_auth_fault(&mut stream)?;
         } else {
@@ -637,6 +662,7 @@ fn is_public_endpoint(request: &str) -> bool {
     request.contains(":GetServices") ||
     request.contains(":GetSystemDateAndTime") ||
     request.contains(":GetServiceCapabilities")
+    // Note: Snapshot endpoint requires authentication as per ONVIF standards
 }
 
 fn extract_authorization_header(request: &str) -> Option<String> {
@@ -1043,7 +1069,13 @@ fn detect_unsupported_onvif_endpoint(request: &str) -> Option<String> {
     }
 
     // Check for other SOAP action patterns that might be ONVIF
-    if request.contains("soap:Envelope") || request.contains("soap:Body") {
+    if request.contains("soap:Envelope")
+        || request.contains("s:Envelope")
+        || request.contains(":Envelope")
+        || request.contains("soap:Body")
+        || request.contains("s:Body")
+        || request.contains(":Body")
+    {
         // Extract potential action from SOAPAction header or request body
         for line in request.lines() {
             if line.to_lowercase().contains("soapaction:") {
@@ -1086,6 +1118,113 @@ fn send_unsupported_endpoint_response(
     send_soap_response(stream, &body)
 }
 
+/// Handle HTTP GET request for snapshot image
+fn handle_snapshot_request(
+    stream: &mut TcpStream,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Processing snapshot request...");
+
+    match capture_snapshot_from_rtsp(&config.rtsp_stream_url) {
+        Ok(jpeg_data) => {
+            println!("Successfully captured snapshot ({} bytes)", jpeg_data.len());
+            send_snapshot_response(stream, &jpeg_data)?;
+        }
+        Err(e) => {
+            eprintln!("Failed to capture snapshot: {}", e);
+            send_snapshot_error_response(stream)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Capture a single frame from the RTSP stream using FFmpeg
+fn capture_snapshot_from_rtsp(rtsp_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    println!("Capturing frame from RTSP stream: {}", rtsp_url);
+
+    // Create a temporary file for the snapshot
+    let temp_file =
+        NamedTempFile::new().map_err(|e| format!("Failed to create temporary file: {}", e))?;
+    let temp_path = temp_file.path();
+
+    // Use FFmpeg to capture a single frame
+    let output = Command::new("ffmpeg")
+        .args([
+            "-i",
+            rtsp_url,
+            "-vframes",
+            "1", // Capture only 1 frame
+            "-f",
+            "image2", // Output as image
+            "-codec:v",
+            "mjpeg", // JPEG codec
+            "-q:v",
+            "2",  // High quality (lower number = higher quality)
+            "-y", // Overwrite output file
+            temp_path.to_str().unwrap(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to execute FFmpeg: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFmpeg failed: {}", stderr).into());
+    }
+
+    // Read the captured image
+    let jpeg_data =
+        std::fs::read(temp_path).map_err(|e| format!("Failed to read captured image: {}", e))?;
+
+    if jpeg_data.is_empty() {
+        return Err("Captured image is empty".into());
+    }
+
+    println!("FFmpeg captured {} byte JPEG image", jpeg_data.len());
+    Ok(jpeg_data)
+}
+
+/// Send HTTP response with JPEG image data
+fn send_snapshot_response(
+    stream: &mut TcpStream,
+    jpeg_data: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nPragma: no-cache\r\nConnection: close\r\n\r\n",
+        jpeg_data.len()
+    );
+
+    // Send HTTP headers
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|e| format!("Failed to send snapshot headers: {}", e))?;
+
+    // Send image data
+    stream
+        .write_all(jpeg_data)
+        .map_err(|e| format!("Failed to send snapshot data: {}", e))?;
+
+    stream
+        .flush()
+        .map_err(|e| format!("Failed to flush snapshot response: {}", e))?;
+
+    Ok(())
+}
+
+/// Send error response when snapshot capture fails
+fn send_snapshot_error_response(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+    let error_body = "Snapshot capture failed";
+    send_http_response(
+        stream,
+        "500 Internal Server Error",
+        "text/plain",
+        error_body,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1109,6 +1248,8 @@ mod tests {
         assert!(!is_public_endpoint(
             "<soap:Body><GetSnapshotUri/></soap:Body>"
         ));
+        // Snapshot endpoint should require authentication (ONVIF standard)
+        assert!(!is_public_endpoint("GET /snapshot.jpg HTTP/1.1"));
     }
 
     #[test]
@@ -1238,11 +1379,12 @@ mod tests {
     fn test_config_from_env() {
         // Save original environment
         let original_vars: Vec<_> = [
-            "rtsp_stream_url",
+            "RTSP_STREAM_URL",
             "ONVIF_PORT",
             "DEVICE_NAME",
             "ONVIF_USERNAME",
             "ONVIF_PASSWORD",
+            "WS_DISCOVERY_ENABLED",
         ]
         .iter()
         .map(|var| (var, std::env::var(var).ok()))
@@ -1250,11 +1392,12 @@ mod tests {
 
         // Set test environment variables
         unsafe {
-            std::env::set_var("rtsp_stream_url", "rtsp://test:8554/stream");
+            std::env::set_var("RTSP_STREAM_URL", "rtsp://test:8554/stream");
             std::env::set_var("ONVIF_PORT", "8080");
             std::env::set_var("DEVICE_NAME", "Test-Camera");
             std::env::set_var("ONVIF_USERNAME", "testuser");
             std::env::set_var("ONVIF_PASSWORD", "testpass");
+            std::env::set_var("WS_DISCOVERY_ENABLED", "true");
         }
 
         // Test successful config creation
@@ -1267,6 +1410,7 @@ mod tests {
         assert_eq!(config.device_name, "Test-Camera");
         assert_eq!(config.onvif_username, "testuser");
         assert_eq!(config.onvif_password, "testpass");
+        assert_eq!(config.ws_discovery_enabled, true);
 
         // Test invalid port
         unsafe {
@@ -1277,7 +1421,7 @@ mod tests {
 
         // Test missing environment variable
         unsafe {
-            std::env::remove_var("rtsp_stream_url");
+            std::env::remove_var("RTSP_STREAM_URL");
         }
         let config = Config::from_env();
         assert!(config.is_err());
@@ -1328,5 +1472,29 @@ Content-Type: application/soap+xml
             username,
             password
         ));
+    }
+
+    #[test]
+    fn test_snapshot_uri_response() {
+        use crate::onvif_responses::get_snapshot_uri_response;
+
+        let container_ip = "192.168.1.100";
+        let onvif_port = "8080";
+
+        let response = get_snapshot_uri_response(container_ip, onvif_port);
+
+        // Check that the response contains the expected ONVIF structure
+        assert!(response.contains("GetSnapshotUriResponse"));
+        assert!(response.contains("http://www.onvif.org/ver10/media/wsdl"));
+        assert!(response.contains("MediaUri"));
+        assert!(response.contains(&format!(
+            "http://{}:{}/snapshot.jpg",
+            container_ip, onvif_port
+        )));
+
+        // Ensure it's valid XML structure
+        assert!(response.contains("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(response.contains("<soap:Envelope"));
+        assert!(response.contains("</soap:Envelope>"));
     }
 }

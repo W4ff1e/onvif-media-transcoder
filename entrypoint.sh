@@ -236,10 +236,16 @@ fi
 echo "INFO: MediaMTX stream will be available as: $STREAM_NAME"
 
 # Update MediaMTX config with the correct stream path and port
-sed -e "s/STREAM_PATH_PLACEHOLDER/${STREAM_NAME}/g" \
-    -e "s/RTSP_PORT_PLACEHOLDER/${RTSP_OUTPUT_PORT}/g" \
-    -e "s/SOURCE_PLACEHOLDER/${INPUT_URL}/g" \
+sed -e "s|STREAM_PATH_PLACEHOLDER|${STREAM_NAME}|g" \
+    -e "s|RTSP_PORT_PLACEHOLDER|${RTSP_OUTPUT_PORT}|g" \
+    -e "s|SOURCE_PLACEHOLDER|${INPUT_URL}|g" \
     /etc/mediamtx.yml > /tmp/mediamtx.yml
+
+echo "========================================" 
+echo "Generated MediaMTX Configuration:"
+echo "========================================"
+cat /tmp/mediamtx.yml
+echo "========================================"
 
 # Start MediaMTX RTSP server
 echo "Starting MediaMTX RTSP server..."
