@@ -309,28 +309,27 @@ start_ffmpeg_with_retry() {
     while [ $retry_count -lt $max_retries ]; do
         echo "FFmpeg attempt $((retry_count + 1)) of $max_retries..."
         
-        # Start FFmpeg with UniFi Protect optimized settings
-        # Input: 480x270, Output: Scaled appropriately, No audio
-        # Source is yuvj420p (full range), preserve color characteristics
+        # Start FFmpeg with ONVIF live streaming optimized settings
+        # Optimized for real-time viewing compatibility (fixes green frame in live view)
         ffmpeg \
             -re \
             -rw_timeout 10000000 \
             -i "${INPUT_URL}" \
             -c:v libx264 \
-            -preset medium \
+            -preset ultrafast \
             -tune zerolatency \
             -profile:v baseline \
             -level 3.1 \
             -pix_fmt yuv420p \
-            -vf "scale=960:540:flags=bilinear:force_original_aspect_ratio=disable" \
+            -vf "scale=960:540:flags=bilinear:force_original_aspect_ratio=disable,fps=15" \
             -g 15 \
             -keyint_min 15 \
             -sc_threshold 0 \
             -b:v 1500k \
-            -maxrate 2M \
-            -bufsize 4M \
+            -maxrate 1800k \
+            -bufsize 2M \
             -refs 1 \
-            -x264opts "nal-hrd=cbr:force-cfr=1" \
+            -x264opts "nal-hrd=cbr:force-cfr=1:intra-refresh=1:keyint=15:min-keyint=15" \
             -an \
             -f rtsp \
             -rtsp_transport tcp \
