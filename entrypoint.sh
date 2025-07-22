@@ -352,7 +352,22 @@ fi
 echo "Checking ONVIF binary properties..."
 ls -la /usr/local/bin/onvif-media-transcoder
 echo "Binary dependencies:"
-ldd /usr/local/bin/onvif-media-transcoder || echo "ldd failed - binary might be statically linked"
+ldd /usr/local/bin/onvif-media-transcoder || echo "ldd failed - checking for missing libraries"
+
+# Check for missing dynamic libraries
+echo "Checking for missing libraries:"
+if ldd /usr/local/bin/onvif-media-transcoder 2>&1 | grep -q "not found"; then
+    echo "ERROR: Missing libraries detected!"
+    ldd /usr/local/bin/onvif-media-transcoder 2>&1 | grep "not found"
+    echo "Available system libraries:"
+    ls /lib /usr/lib /usr/local/lib 2>/dev/null | head -20
+else
+    echo "All libraries appear to be available"
+fi
+
+# Test if the dynamic linker can load the binary
+echo "Testing dynamic linker directly:"
+/lib/ld-musl-x86_64.so.1 /usr/local/bin/onvif-media-transcoder --help 2>&1 | head -3 || echo "Dynamic linker test failed"
 
 # Test if binary can execute at all
 echo "Testing basic binary execution..."

@@ -35,8 +35,11 @@ RUN --mount=type=cache,target=/app/target \
 # Runtime stage - minimal image for running the application
 FROM alpine:latest
 
-# Install runtime dependencies
-RUN apk add --no-cache curl ffmpeg
+# Install runtime dependencies including image processing libraries
+RUN apk add --no-cache \
+    curl \
+    ffmpeg \
+    musl-dev
 
 # Download and install MediaMTX
 RUN curl -L https://github.com/bluenviron/mediamtx/releases/download/v1.13.0/mediamtx_v1.13.0_linux_amd64.tar.gz \
