@@ -351,6 +351,8 @@ fi
 # Check binary permissions and properties
 echo "Checking ONVIF binary properties..."
 ls -la /usr/local/bin/onvif-media-transcoder
+echo "Binary file type:"
+file /usr/local/bin/onvif-media-transcoder 2>/dev/null || echo "file command not available"
 echo "Binary dependencies:"
 ldd /usr/local/bin/onvif-media-transcoder || echo "ldd failed - binary might be statically linked"
 
@@ -364,26 +366,87 @@ echo "  ONVIF_USERNAME=${ONVIF_USERNAME}"
 echo "  ONVIF_PASSWORD=[HIDDEN]"
 echo "  WS_DISCOVERY_ENABLED=${WS_DISCOVERY_ENABLED}"
 
+# Test if the binary can run with --help or --version
+echo "Testing if binary accepts help flag:"
+/usr/local/bin/onvif-media-transcoder --help 2>&1 | head -10 || echo "No help flag supported"
+echo "Testing if binary accepts version flag:"
+/usr/local/bin/onvif-media-transcoder --version 2>&1 || echo "No version flag supported"
+
+# Check system architecture and compatibility
+echo "System information:"
+echo "  Architecture: $(uname -m)"
+echo "  Kernel: $(uname -r)"
+echo "  OS: $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME || echo "Unknown")"
+
+# Check what's currently using the ONVIF port
+echo "Checking what's listening on ONVIF port ${ONVIF_PORT}..."
+netstat -tlnp 2>/dev/null | grep ":${ONVIF_PORT}" || echo "Port ${ONVIF_PORT} is free"
+ss -tlnp 2>/dev/null | grep ":${ONVIF_PORT}" || echo "Port ${ONVIF_PORT} is free (ss check)"
+
+# Check what's currently using the WS-Discovery port (UDP 3702)
+echo "Checking what's listening on WS-Discovery port 3702..."
+netstat -ulnp 2>/dev/null | grep ":3702" || echo "UDP port 3702 is free"
+ss -ulnp 2>/dev/null | grep ":3702" || echo "UDP port 3702 is free (ss check)"
+
 # Start ONVIF service with logging
 echo "Starting ONVIF service with logging..."
+echo "Command: /usr/local/bin/onvif-media-transcoder"
+echo "Redirecting output to: /tmp/onvif.log"
+
+# IMPORTANT: First run a quick foreground test to capture any immediate output or crashes
+echo "Running foreground test to capture startup messages..."
+{
+    echo "=== FOREGROUND TEST START $(date) ==="
+    timeout 5 /usr/local/bin/onvif-media-transcoder
+    echo "=== FOREGROUND TEST END (exit code: $?) $(date) ==="
+} 2>&1 | tee /tmp/onvif_foreground.log
+
+echo "Foreground test output captured, now starting background service..."
+
+# Now start in background with both stdout and stderr captured
 /usr/local/bin/onvif-media-transcoder > /tmp/onvif.log 2>&1 &
 ONVIF_SERVICE_PID=$!
+echo "Started ONVIF service in background with PID: $ONVIF_SERVICE_PID"
 
-# Give it a moment to start
+# Check immediately if process started
+sleep 1
+if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
+    echo "ERROR: ONVIF service died within 1 second of startup!"
+    echo "Checking for any captured output..."
+    
+    # Show foreground test output
+    echo "=== FOREGROUND TEST OUTPUT ==="
+    cat /tmp/onvif_foreground.log 2>/dev/null || echo "No foreground output"
+    
+    # Show background output
+    echo "=== BACKGROUND SERVICE OUTPUT ==="
+    cat /tmp/onvif.log 2>/dev/null || echo "No background output"
+    
+    dump_onvif_logs
+    dump_mediamtx_logs
+    kill $MEDIAMTX_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
+    exit 1
+fi
+
+# Give it more time to fully start
 sleep 3
 
 # Check if the process is still running
-echo "Checking if ONVIF service process is still alive..."
+echo "Checking if ONVIF service process is still alive after 3 seconds..."
 if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
-    echo "ERROR: Failed to start ONVIF service (process died immediately)"
-    echo "Process exit status check:"
-    wait $ONVIF_SERVICE_PID
-    exit_code=$?
-    echo "Exit code: $exit_code"
+    echo "ERROR: Failed to start ONVIF service (process died after startup)"
     
-    # Try to get more debugging info
-    echo "Attempting to run binary directly for debugging:"
-    timeout 5 /usr/local/bin/onvif-media-transcoder || echo "Direct execution failed with exit code: $?"
+    # Wait for exit code
+    wait $ONVIF_SERVICE_PID 2>/dev/null
+    exit_code=$?
+    echo "Process exit code: $exit_code"
+    
+    # Show all captured output
+    echo "=== FOREGROUND TEST OUTPUT ==="
+    cat /tmp/onvif_foreground.log 2>/dev/null || echo "No foreground output"
+    
+    echo "=== BACKGROUND SERVICE OUTPUT ==="
+    cat /tmp/onvif.log 2>/dev/null || echo "No background output"
     
     dump_onvif_logs
     dump_mediamtx_logs
