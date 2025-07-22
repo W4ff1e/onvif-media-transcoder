@@ -89,7 +89,7 @@ jobs:
         # Give the container a moment to start
         sleep 5
 
-        # Check if container is still running
+        echo "Checking if container is running..."
         if ! docker ps | grep test-container; then
           echo "Container died immediately, showing logs:"
           docker logs test-container

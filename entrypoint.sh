@@ -180,9 +180,9 @@ export WS_DISCOVERY_ENABLED="${WS_DISCOVERY_ENABLED}"
 # Function to manage MediaMTX logs with size capping
 manage_mediamtx_logs() {
     local log_file="/tmp/mediamtx.log"
-    local max_lines=1000
-    local keep_head=500
-    local keep_tail=500
+    local max_lines=250
+    local keep_head=100
+    local keep_tail=150
     
     # Monitor log file size and truncate if needed
     while true; do
@@ -192,7 +192,7 @@ manage_mediamtx_logs() {
             if [ $line_count -gt $max_lines ]; then
                 echo "$(date): MediaMTX log reached $line_count lines, truncating..." >> "$log_file"
                 
-                # Keep first 500 and last 500 lines
+                # Keep first 100 and last 150 lines
                 head -n $keep_head "$log_file" > "${log_file}.tmp"
                 echo "" >> "${log_file}.tmp"
                 echo "=== LOG TRUNCATED $(date) ===" >> "${log_file}.tmp"
@@ -206,17 +206,60 @@ manage_mediamtx_logs() {
     done
 }
 
+# Function to manage ONVIF service logs with size capping
+manage_onvif_logs() {
+    local log_file="/tmp/onvif.log"
+    local max_lines=250
+    local keep_head=100
+    local keep_tail=150
+    
+    # Monitor log file size and truncate if needed
+    while true; do
+        sleep 30
+        if [ -f "$log_file" ]; then
+            local line_count=$(wc -l < "$log_file")
+            if [ $line_count -gt $max_lines ]; then
+                echo "$(date): ONVIF log reached $line_count lines, truncating..." >> "$log_file"
+                
+                # Keep first 100 and last 150 lines
+                head -n $keep_head "$log_file" > "${log_file}.tmp"
+                echo "" >> "${log_file}.tmp"
+                echo "=== LOG TRUNCATED $(date) ===" >> "${log_file}.tmp"
+                echo "" >> "${log_file}.tmp"
+                tail -n $keep_tail "$log_file" >> "${log_file}.tmp"
+                mv "${log_file}.tmp" "$log_file"
+                
+                echo "$(date): ONVIF log truncated, keeping first $keep_head and last $keep_tail lines" >> "$log_file"
+            fi
+        fi
+    done
+}
+
 # Function to dump MediaMTX logs on error
 dump_mediamtx_logs() {
     local log_file="/tmp/mediamtx.log"
     if [ -f "$log_file" ]; then
         echo "========================================" 
-        echo "MediaMTX Log (Last 150 lines):"
+        echo "MediaMTX Log (All 250 lines: first 100 + last 150):"
         echo "========================================"
-        tail -n 150 "$log_file"
+        cat "$log_file"
         echo "========================================"
     else
         echo "No MediaMTX log file found"
+    fi
+}
+
+# Function to dump ONVIF service logs on error
+dump_onvif_logs() {
+    local log_file="/tmp/onvif.log"
+    if [ -f "$log_file" ]; then
+        echo "========================================" 
+        echo "ONVIF Service Log (All 250 lines: first 100 + last 150):"
+        echo "========================================"
+        cat "$log_file"
+        echo "========================================"
+    else
+        echo "No ONVIF service log file found"
     fi
 }
 
@@ -305,15 +348,26 @@ if [ ! -f "/usr/local/bin/onvif-media-transcoder" ]; then
     exit 1
 fi
 
-/usr/local/bin/onvif-media-transcoder &
+# Start ONVIF service with logging
+echo "Starting ONVIF service with logging..."
+/usr/local/bin/onvif-media-transcoder > /tmp/onvif.log 2>&1 &
 ONVIF_SERVICE_PID=$!
+
+# Give it a moment to start
+sleep 2
+
 if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
     echo "ERROR: Failed to start ONVIF service"
+    dump_onvif_logs
     dump_mediamtx_logs
     kill $MEDIAMTX_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
 echo "ONVIF service started with PID: $ONVIF_SERVICE_PID"
+
+# Start ONVIF log management in background
+manage_onvif_logs &
+ONVIF_LOG_MANAGER_PID=$!
 
 echo "========================================"
 echo "ONVIF Media Transcoder is ready!"
@@ -327,7 +381,8 @@ echo "RTSP Stream: ${RTSP_OUTPUT_URL}"
 echo "ONVIF Endpoint: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
 echo "Note: Input stream is served via MediaMTX RTSP server"
 echo "Log files:"
-echo "  - MediaMTX: /tmp/mediamtx.log (capped at 1000 lines)"
+echo "  - MediaMTX: /tmp/mediamtx.log (capped at 250 lines: first 100 + last 150)"
+echo "  - ONVIF Service: /tmp/onvif.log (capped at 250 lines: first 100 + last 150)"
 echo "========================================"
 
 # Function to handle shutdown
@@ -336,6 +391,7 @@ cleanup_services() {
     kill $ONVIF_SERVICE_PID 2>/dev/null
     kill $MEDIAMTX_PID 2>/dev/null
     kill $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
+    kill $ONVIF_LOG_MANAGER_PID 2>/dev/null
     wait
     echo "All services stopped."
 }
@@ -356,6 +412,7 @@ monitor_all_services() {
         
         if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
             echo "ERROR: ONVIF service died (PID: $ONVIF_SERVICE_PID)"
+            dump_onvif_logs
             cleanup_services
             exit 1
         fi
@@ -365,6 +422,13 @@ monitor_all_services() {
             manage_mediamtx_logs &
             MEDIAMTX_LOG_MANAGER_PID=$!
             echo "MediaMTX log manager restarted with PID: $MEDIAMTX_LOG_MANAGER_PID"
+        fi
+        
+        if ! kill -0 $ONVIF_LOG_MANAGER_PID 2>/dev/null; then
+            echo "WARNING: ONVIF log manager died (PID: $ONVIF_LOG_MANAGER_PID), restarting..."
+            manage_onvif_logs &
+            ONVIF_LOG_MANAGER_PID=$!
+            echo "ONVIF log manager restarted with PID: $ONVIF_LOG_MANAGER_PID"
         fi
     done
 }
