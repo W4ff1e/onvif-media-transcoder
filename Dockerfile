@@ -54,6 +54,10 @@ FROM alpine:latest
 
 # Declare build arguments for cross-platform support
 ARG TARGETARCH
+
+# Declare version of MediaMTX to install
+# This can be overridden at build time with --build-arg MEDIAMTX_VERSION=vX.Y.Z
+# Default version is set to v1.13.0
 ARG MEDIAMTX_VERSION=v1.13.0
 
 # Install runtime dependencies including image processing libraries

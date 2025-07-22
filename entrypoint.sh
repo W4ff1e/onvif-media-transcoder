@@ -361,24 +361,6 @@ ONVIF_SERVICE_PID=$!
 # Give it a moment to start
 sleep 3
 
-# Check if the process is still running
-echo "Checking if ONVIF service process is still alive..."
-if ! kill -0 $ONVIF_SERVICE_PID 2>/dev/null; then
-    echo "ERROR: Failed to start ONVIF service (process died immediately)"
-    echo "Process exit status check:"
-    wait $ONVIF_SERVICE_PID
-    exit_code=$?
-    echo "Exit code: $exit_code"
-    
-    # Try to get more debugging info
-    echo "Attempting to run binary directly for debugging:"
-    timeout 5 /usr/local/bin/onvif-media-transcoder || echo "Direct execution failed with exit code: $?"
-    
-    dump_onvif_logs
-    dump_mediamtx_logs
-    kill $MEDIAMTX_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
-    exit 1
-fi
 echo "ONVIF service started with PID: $ONVIF_SERVICE_PID"
 
 # Start ONVIF log management in background
