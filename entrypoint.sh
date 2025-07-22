@@ -162,12 +162,15 @@ RTSP_OUTPUT_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 echo "Configuration validated successfully:"
 echo "  Input URL: ${INPUT_URL}"
 echo "  Container IP: ${CONTAINER_IP}"
+echo "DEBUG: About to display RTSP Output URL..."
 echo "  RTSP Output: ${RTSP_OUTPUT_URL}"
+echo "DEBUG: RTSP Output URL displayed successfully"
 echo "  ONVIF Port: ${ONVIF_PORT}"
 echo "  Device Name: ${DEVICE_NAME}"
 echo "  ONVIF Username: ${ONVIF_USERNAME}"
 echo "  ONVIF Password: [HIDDEN]"
 echo "  WS-Discovery: ${WS_DISCOVERY_ENABLED}"
+echo "DEBUG: Configuration display completed successfully"
 
 # Export environment variables for Rust application
 export RTSP_STREAM_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
@@ -284,16 +287,20 @@ sed -e "s|STREAM_PATH_PLACEHOLDER|${STREAM_NAME}|g" \
     -e "s|SOURCE_PLACEHOLDER|${INPUT_URL}|g" \
     /etc/mediamtx.yml > /tmp/mediamtx.yml
 
-# echo "========================================" 
-# echo "Generated MediaMTX Configuration:"
-# echo "========================================"
-# cat /tmp/mediamtx.yml
-# echo "========================================"
+echo "DEBUG: Generated MediaMTX configuration:"
+echo "========================================" 
+head -30 /tmp/mediamtx.yml
+echo "========================================"
+
+# Test MediaMTX binary before starting with actual config
+echo "DEBUG: Testing MediaMTX binary with --help..."
+timeout 5 mediamtx --help >/dev/null 2>&1 && echo "MediaMTX binary test passed" || echo "WARNING: MediaMTX binary test failed"
 
 # Start MediaMTX RTSP server
-echo "Starting MediaMTX RTSP server..."
+echo "DEBUG: About to start MediaMTX RTSP server..."
 mediamtx /tmp/mediamtx.yml > /tmp/mediamtx.log 2>&1 &
 MEDIAMTX_PID=$!
+echo "DEBUG: MediaMTX started with PID: $MEDIAMTX_PID"
 
 if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
     echo "ERROR: Failed to start MediaMTX RTSP server"
@@ -324,6 +331,16 @@ fi
 # Start MediaMTX log management in background
 manage_mediamtx_logs &
 MEDIAMTX_LOG_MANAGER_PID=$!
+echo "DEBUG: MediaMTX log manager started with PID: $MEDIAMTX_LOG_MANAGER_PID"
+
+# Check if MediaMTX is still running before proceeding
+if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
+    echo "ERROR: MediaMTX process died during startup (PID: $MEDIAMTX_PID)"
+    echo "MediaMTX exit status: $(wait $MEDIAMTX_PID 2>/dev/null; echo $?)"
+    dump_mediamtx_logs
+    exit 1
+fi
+echo "DEBUG: MediaMTX still running with PID: $MEDIAMTX_PID"
 
 # Create directories
 mkdir -p /tmp

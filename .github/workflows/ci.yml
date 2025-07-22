@@ -75,7 +75,9 @@ jobs:
       run: |
         # Start the container in background
         docker run -d --name test-container \
-          -e INPUT_URL="https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8" \
+          -e INPUT_URL="rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4" \
+          -e RTSP_OUTPUT_PORT="8554" \
+          -e RTSP_PATH="/stream" \
           -e ONVIF_PORT="8080" \
           -e DEVICE_NAME="Test-Camera" \
           -e ONVIF_USERNAME="admin" \
@@ -86,8 +88,8 @@ jobs:
           -p 3702:3702/udp \
           onvif-media-transcoder:test
 
-        # Give the container a moment to start
-        sleep 5
+        # Give the container more time to start (Rust compilation can be slow)
+        sleep 10
 
         echo "Checking if container is running..."
         if ! docker ps | grep test-container; then
