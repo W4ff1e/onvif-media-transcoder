@@ -91,8 +91,10 @@ ENV ONVIF_USERNAME="admin"
 ENV ONVIF_PASSWORD="onvif-rust"
 ENV WS_DISCOVERY_ENABLED="true"
 
-# Expose the ports (TCP for ONVIF, UDP for WS-Discovery)
-EXPOSE 8080 8554 3702/udp
+# Expose the ports (TCP for ONVIF, UDP for WS-Discovery) - respects build-time configuration
+EXPOSE ${ONVIF_PORT} ${RTSP_OUTPUT_PORT} 3702/udp
 
-# Set the default command to run both commands
+# Set the default command to kick off the entrypoint script
+# This script will handle the configuration and start the MediaMTX server
+# and the ONVIF Media Transcoder application.
 CMD ["/entrypoint.sh"]
