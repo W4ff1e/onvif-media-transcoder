@@ -162,18 +162,16 @@ RTSP_OUTPUT_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 echo "Configuration validated successfully:"
 echo "  Input URL: ${INPUT_URL}"
 echo "  Container IP: ${CONTAINER_IP}"
-echo "DEBUG: About to display RTSP Output URL..."
 echo "  RTSP Output: ${RTSP_OUTPUT_URL}"
-echo "DEBUG: RTSP Output URL displayed successfully"
 echo "  ONVIF Port: ${ONVIF_PORT}"
 echo "  Device Name: ${DEVICE_NAME}"
 echo "  ONVIF Username: ${ONVIF_USERNAME}"
 echo "  ONVIF Password: [HIDDEN]"
 echo "  WS-Discovery: ${WS_DISCOVERY_ENABLED}"
-echo "DEBUG: Configuration display completed successfully"
 
 # Export environment variables for Rust application
 export RTSP_STREAM_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
+export CONTAINER_IP="${CONTAINER_IP}"
 export ONVIF_PORT="${ONVIF_PORT}"
 export DEVICE_NAME="${DEVICE_NAME}"
 export ONVIF_USERNAME="${ONVIF_USERNAME}"
@@ -287,20 +285,12 @@ sed -e "s|STREAM_PATH_PLACEHOLDER|${STREAM_NAME}|g" \
     -e "s|SOURCE_PLACEHOLDER|${INPUT_URL}|g" \
     /etc/mediamtx.yml > /tmp/mediamtx.yml
 
-echo "DEBUG: Generated MediaMTX configuration:"
-echo "========================================" 
-head -30 /tmp/mediamtx.yml
-echo "========================================"
-
-# Test MediaMTX binary before starting with actual config
-echo "DEBUG: Testing MediaMTX binary with --help..."
-timeout 5 mediamtx --help >/dev/null 2>&1 && echo "MediaMTX binary test passed" || echo "WARNING: MediaMTX binary test failed"
+echo "INFO: MediaMTX configuration generated successfully"
 
 # Start MediaMTX RTSP server
-echo "DEBUG: About to start MediaMTX RTSP server..."
+echo "Starting MediaMTX RTSP server..."
 mediamtx /tmp/mediamtx.yml > /tmp/mediamtx.log 2>&1 &
 MEDIAMTX_PID=$!
-echo "DEBUG: MediaMTX started with PID: $MEDIAMTX_PID"
 
 if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
     echo "ERROR: Failed to start MediaMTX RTSP server"
@@ -331,7 +321,6 @@ fi
 # Start MediaMTX log management in background
 manage_mediamtx_logs &
 MEDIAMTX_LOG_MANAGER_PID=$!
-echo "DEBUG: MediaMTX log manager started with PID: $MEDIAMTX_LOG_MANAGER_PID"
 
 # Check if MediaMTX is still running before proceeding
 if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
@@ -340,7 +329,6 @@ if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
     dump_mediamtx_logs
     exit 1
 fi
-echo "DEBUG: MediaMTX still running with PID: $MEDIAMTX_PID"
 
 # Create directories
 mkdir -p /tmp
@@ -364,37 +352,6 @@ if [ ! -f "/usr/local/bin/onvif-media-transcoder" ]; then
     kill $MEDIAMTX_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     exit 1
 fi
-
-# Check binary permissions and properties
-echo "Checking ONVIF binary properties..."
-ls -la /usr/local/bin/onvif-media-transcoder
-echo "Binary dependencies:"
-ldd /usr/local/bin/onvif-media-transcoder || echo "ldd failed - checking for missing libraries"
-
-# Check for missing dynamic libraries
-echo "Checking for missing libraries:"
-if ldd /usr/local/bin/onvif-media-transcoder 2>&1 | grep -q "not found"; then
-    echo "ERROR: Missing libraries detected!"
-    ldd /usr/local/bin/onvif-media-transcoder 2>&1 | grep "not found"
-    echo "Available system libraries:"
-    ls /lib /usr/lib /usr/local/lib 2>/dev/null | head -20
-else
-    echo "All libraries appear to be available"
-fi
-
-# Test if the dynamic linker can load the binary
-echo "Testing dynamic linker directly:"
-/lib/ld-musl-x86_64.so.1 /usr/local/bin/onvif-media-transcoder --help 2>&1 | head -3 || echo "Dynamic linker test failed"
-
-# Test if binary can execute at all
-echo "Testing basic binary execution..."
-echo "Environment variables for Rust app:"
-echo "  RTSP_STREAM_URL=${RTSP_STREAM_URL}"
-echo "  ONVIF_PORT=${ONVIF_PORT}"
-echo "  DEVICE_NAME=${DEVICE_NAME}"
-echo "  ONVIF_USERNAME=${ONVIF_USERNAME}"
-echo "  ONVIF_PASSWORD=[HIDDEN]"
-echo "  WS_DISCOVERY_ENABLED=${WS_DISCOVERY_ENABLED}"
 
 # Start ONVIF service with logging
 echo "Starting ONVIF service with logging..."

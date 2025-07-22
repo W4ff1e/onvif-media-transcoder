@@ -13,7 +13,7 @@ mod ws_discovery;
 
 use onvif_endpoints::UNSUPPORTED_ENDPOINTS;
 use onvif_responses::*;
-use ws_discovery::{DeviceInfo, WSDiscoveryServer, get_default_interface_ip};
+use ws_discovery::{DeviceInfo, WSDiscoveryServer};
 
 /// Configuration structure for the ONVIF Media Transcoder
 #[derive(Debug, Clone)]
@@ -76,17 +76,12 @@ impl Config {
         println!("Port validation successful");
 
         // Get the container IP for WS-Discovery
-        println!("Detecting container IP...");
-        let container_ip = match get_default_interface_ip() {
-            Ok(ip) => {
-                println!("Container IP detected: {ip}");
-                ip
-            }
-            Err(e) => {
-                eprintln!("Warning: Could not determine container IP ({e}), using localhost");
-                "127.0.0.1".to_string()
-            }
-        };
+        println!("Reading CONTAINER_IP environment variable...");
+        let container_ip = std::env::var("CONTAINER_IP").unwrap_or_else(|_| {
+            println!("Warning: CONTAINER_IP environment variable not set, using localhost");
+            "127.0.0.1".to_string()
+        });
+        println!("Container IP: {container_ip}");
 
         println!("Configuration creation completed successfully");
         Ok(Config {

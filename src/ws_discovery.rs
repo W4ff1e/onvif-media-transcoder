@@ -378,26 +378,3 @@ impl Drop for WSDiscoveryServer {
         }
     }
 }
-
-/// Helper function to get the default network interface IP address
-///
-/// This function attempts to determine the local IP address by connecting
-/// to a remote address and checking the local socket address.
-///
-/// # Returns
-/// * `Result<String, Box<dyn std::error::Error>>` - The local IP address as a string, or an error
-pub fn get_default_interface_ip() -> Result<String, Box<dyn std::error::Error>> {
-    // Try to connect to a remote address to determine our local IP
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind temporary socket: {e}"))?;
-
-    socket
-        .connect("8.8.8.8:80")
-        .map_err(|e| format!("Failed to connect to determine local IP: {e}"))?;
-
-    let local_addr = socket
-        .local_addr()
-        .map_err(|e| format!("Failed to get local address: {e}"))?;
-
-    Ok(local_addr.ip().to_string())
-}
