@@ -75,13 +75,35 @@ impl Config {
             .map_err(|_| "ONVIF_PORT must be a valid port number")?;
         println!("Port validation successful");
 
-        // Get the container IP for WS-Discovery
+        // Get the container IP for WS-Discovery with better validation
         println!("Reading CONTAINER_IP environment variable...");
         let container_ip = std::env::var("CONTAINER_IP").unwrap_or_else(|_| {
             println!("Warning: CONTAINER_IP environment variable not set, using localhost");
             "127.0.0.1".to_string()
         });
+
+        // Validate container IP is not empty
+        if container_ip.is_empty() {
+            return Err("CONTAINER_IP cannot be empty - container IP detection failed".into());
+        }
+
+        // Basic IP format validation
+        if container_ip.parse::<std::net::IpAddr>().is_err() {
+            return Err(
+                format!("CONTAINER_IP '{}' is not a valid IP address", container_ip).into(),
+            );
+        }
+
         println!("Container IP: {container_ip}");
+
+        // Validate RTSP stream URL format
+        if !rtsp_stream_url.starts_with("rtsp://") {
+            return Err(format!(
+                "RTSP_STREAM_URL must start with 'rtsp://', got: {}",
+                rtsp_stream_url
+            )
+            .into());
+        }
 
         println!("Configuration creation completed successfully");
         Ok(Config {
@@ -114,9 +136,53 @@ impl Config {
     }
 }
 
+use std::sync::mpsc::channel;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+
+/// Represents the status of the service components
+#[derive(Debug)]
+pub struct ServiceStatus {
+    pub ws_discovery_healthy: AtomicBool,
+    pub onvif_service_healthy: AtomicBool,
+    pub shutdown_requested: AtomicBool,
+    pub last_error: Mutex<Option<String>>,
+}
+
+impl ServiceStatus {
+    pub fn new() -> Self {
+        ServiceStatus {
+            ws_discovery_healthy: AtomicBool::new(false),
+            onvif_service_healthy: AtomicBool::new(false),
+            shutdown_requested: AtomicBool::new(false),
+            last_error: Mutex::new(None),
+        }
+    }
+
+    fn request_shutdown(&self) {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+        println!("Shutdown requested - service will exit after completing current operations");
+    }
+
+    fn is_shutdown_requested(&self) -> bool {
+        self.shutdown_requested.load(Ordering::SeqCst)
+    }
+
+    fn set_error(&self, error: &str) {
+        let mut last_error = self.last_error.lock().unwrap();
+        *last_error = Some(error.to_string());
+        eprintln!("Service error: {}", error);
+    }
+}
+
 /// Main entry point for the ONVIF Media Transcoder
 fn main() {
     println!("Starting ONVIF Media Transcoder...");
+
+    // Create shared service status
+    let service_status = Arc::new(ServiceStatus::new());
 
     // Set up panic hook for better crash reporting
     std::panic::set_hook(Box::new(|panic_info| {
@@ -134,6 +200,10 @@ fn main() {
         // std::process::exit(1);
     }));
 
+    // Set up signal handlers for graceful shutdown
+    let status_for_signal = service_status.clone();
+    setup_signal_handlers(status_for_signal);
+
     // Load configuration from environment variables
     println!("Loading configuration from environment variables...");
     let config = match Config::from_env() {
@@ -150,16 +220,38 @@ fn main() {
     // Display configuration
     config.display();
 
+    // Validate RTSP stream connectivity before starting services
+    println!("Validating RTSP stream connectivity...");
+    match validate_rtsp_stream_connectivity(&config.rtsp_stream_url) {
+        Ok(_) => {
+            println!("RTSP stream connectivity validation passed");
+        }
+        Err(e) => {
+            eprintln!("RTSP stream connectivity validation failed: {e}");
+            eprintln!("The RTSP stream may not be ready yet. This could cause startup issues.");
+            eprintln!(
+                "Continuing anyway, but the service may not function properly until the stream is available."
+            );
+        }
+    }
+
+    // Create a channel for component-level shutdown coordination
+    let (shutdown_tx, shutdown_rx) = channel::<String>();
+
     // Start WS-Discovery server in a separate thread
     if config.ws_discovery_enabled {
         println!("Initializing WS-Discovery server...");
+        let ws_status = service_status.clone();
+
         if let Err(e) = start_ws_discovery_server(&config) {
             eprintln!("Failed to start WS-Discovery server: {e}");
             println!(
                 "Continuing without WS-Discovery (ONVIF service will still work for direct connections)"
             );
+            ws_status.set_error(&format!("WS-Discovery startup failed: {}", e));
         } else {
             println!("WS-Discovery server initialization completed");
+            ws_status.ws_discovery_healthy.store(true, Ordering::SeqCst);
         }
     } else {
         println!("WS-Discovery is disabled - skipping WS-Discovery server initialization");
@@ -173,9 +265,10 @@ fn main() {
 
     // Start a heartbeat thread to show the service is still alive
     let heartbeat_config = config.clone();
-    thread::spawn(move || {
+    let heartbeat_status = service_status.clone();
+    let heartbeat_handle = thread::spawn(move || {
         let mut counter = 0;
-        loop {
+        while !heartbeat_status.is_shutdown_requested() {
             std::thread::sleep(std::time::Duration::from_secs(30));
             counter += 1;
             println!(
@@ -183,12 +276,281 @@ fn main() {
                 counter, heartbeat_config.onvif_port
             );
         }
+        println!("Heartbeat thread shutting down");
     });
 
-    if let Err(e) = start_onvif_service(&config) {
-        eprintln!("ONVIF service error: {e}");
-        std::process::exit(1);
+    // Start the main ONVIF service with shutdown handling
+    let onvif_service_status = service_status.clone();
+    let onvif_config = config.clone();
+
+    // Start the ONVIF service in the main thread, but monitor for shutdown signals
+    let onvif_thread = thread::spawn(move || {
+        if let Err(e) =
+            start_onvif_service_with_shutdown(&onvif_config, onvif_service_status.clone())
+        {
+            eprintln!("ONVIF service error: {e}");
+            onvif_service_status.set_error(&format!("ONVIF service error: {}", e));
+            shutdown_tx
+                .send("ONVIF service failed".to_string())
+                .unwrap_or_default();
+        } else if onvif_service_status.is_shutdown_requested() {
+            println!("ONVIF service shutdown completed gracefully");
+        } else {
+            // If we get here, the service exited without an error but wasn't asked to shut down
+            eprintln!("WARNING: ONVIF service exited unexpectedly");
+            onvif_service_status.set_error("ONVIF service exited unexpectedly");
+            shutdown_tx
+                .send("ONVIF service stopped".to_string())
+                .unwrap_or_default();
+        }
+    });
+
+    // Wait for shutdown signal from any component
+    let main_status = service_status.clone();
+    match shutdown_rx.recv() {
+        Ok(component) => {
+            println!("Shutdown initiated by component: {}", component);
+            main_status.request_shutdown();
+        }
+        Err(_) => {
+            println!("All component channels closed, initiating shutdown");
+            main_status.request_shutdown();
+        }
     }
+
+    println!("Performing graceful shutdown...");
+
+    // Request shutdown for all components
+    service_status.request_shutdown();
+
+    // Wait for heartbeat thread to finish
+    if let Err(e) = heartbeat_handle.join() {
+        eprintln!("Error joining heartbeat thread: {:?}", e);
+    }
+
+    // Wait for ONVIF service thread to finish with timeout
+    match onvif_thread.join() {
+        Ok(_) => println!("Main ONVIF service thread shut down successfully"),
+        Err(e) => eprintln!("Error joining ONVIF service thread: {:?}", e),
+    }
+
+    println!("ONVIF Media Transcoder shutdown complete");
+}
+
+/// Sets up signal handlers for graceful shutdown
+#[cfg(not(windows))]
+fn setup_signal_handlers(service_status: Arc<ServiceStatus>) {
+    use signal_hook::iterator::Signals;
+
+    // Register handlers for SIGINT and SIGTERM
+    match Signals::new(&[signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM]) {
+        Ok(mut signals) => {
+            let status_clone = service_status.clone();
+            std::thread::spawn(move || {
+                for sig in signals.forever() {
+                    println!("Received signal {} - initiating graceful shutdown", sig);
+                    status_clone.request_shutdown();
+                    break;
+                }
+            });
+            println!("Signal handlers registered for graceful shutdown");
+        }
+        Err(e) => {
+            eprintln!("Failed to set up signal handlers: {}", e);
+            println!("Process will not respond to termination signals gracefully");
+        }
+    }
+}
+
+/// Windows-specific version that doesn't use Unix signals
+#[cfg(windows)]
+fn setup_signal_handlers(_service_status: Arc<ServiceStatus>) {
+    println!("Signal handling is limited on Windows - use Ctrl+C to terminate");
+    // Could implement Windows-specific handlers here if needed
+}
+
+/// Start the ONVIF service with graceful shutdown support
+fn start_onvif_service_with_shutdown(
+    config: &Config,
+    service_status: Arc<ServiceStatus>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Starting ONVIF web service on port {}", config.onvif_port);
+    println!("Exposing RTSP stream: {}", config.rtsp_stream_url);
+    println!("Device Name: {}", config.device_name);
+    println!("Authentication: {} / [HIDDEN]", config.onvif_username);
+    println!("WS-Discovery device discovery is running");
+
+    let bind_addr = format!("0.0.0.0:{}", config.onvif_port);
+    println!("Attempting to bind to address: {bind_addr}");
+
+    // Add more detailed error handling for port binding
+    let listener = match TcpListener::bind(&bind_addr) {
+        Ok(listener) => {
+            println!("Successfully bound to {bind_addr}");
+            listener
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to bind to ONVIF port {}: {}", config.onvif_port, e);
+            eprintln!("{error_msg}");
+
+            // Check if port is already in use
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                eprintln!(
+                    "Port {} is already in use. Please check if another service is running on this port.",
+                    config.onvif_port
+                );
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                eprintln!(
+                    "Permission denied to bind to port {}. May need elevated privileges for ports < 1024.",
+                    config.onvif_port
+                );
+            }
+
+            return Err(error_msg.into());
+        }
+    };
+
+    // Configure listener for non-blocking mode with a short timeout to check for shutdown
+    listener.set_nonblocking(true)?;
+
+    println!("Successfully bound to {bind_addr}");
+    println!("ONVIF Camera service running on port {}", config.onvif_port);
+    if config.ws_discovery_enabled {
+        println!("Device discovery available via WS-Discovery");
+    } else {
+        println!("Device discovery disabled (WS-Discovery is off)");
+    }
+    println!("Stream URI: {}", config.rtsp_stream_url);
+
+    // Add a keepalive mechanism to detect if the service is still running
+    let mut connection_count = 0u64;
+
+    // Update service status to indicate we're running
+    service_status
+        .onvif_service_healthy
+        .store(true, Ordering::SeqCst);
+
+    // Main service loop with shutdown support
+    while !service_status.is_shutdown_requested() {
+        // Accept connections with timeout to check for shutdown
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // Set TCP socket options for better WiFi performance
+                if let Err(e) = stream.set_nodelay(true) {
+                    eprintln!("Warning: Failed to set TCP_NODELAY: {e}");
+                }
+
+                connection_count += 1;
+                println!(
+                    "Accepted connection #{} from: {:?}",
+                    connection_count,
+                    stream.peer_addr()
+                );
+
+                let config_clone = config.clone();
+                let conn_id = connection_count;
+
+                let thread_result = std::panic::catch_unwind(|| {
+                    thread::spawn(move || {
+                        println!("Thread started for connection #{conn_id}");
+                        match handle_onvif_request(stream, &config_clone) {
+                            Ok(_) => {
+                                println!("Successfully handled request #{conn_id}");
+                            }
+                            Err(e) => {
+                                eprintln!("Error handling ONVIF request #{conn_id}: {e}");
+                                // Don't panic on request handling errors
+                            }
+                        }
+                        println!("Thread completed for connection #{conn_id}");
+                    })
+                });
+
+                match thread_result {
+                    Ok(handle) => {
+                        println!("Successfully spawned thread for connection #{connection_count}");
+                        // We could store the handle if we wanted to join later
+                        std::mem::drop(handle);
+                    }
+                    Err(_) => {
+                        eprintln!(
+                            "Failed to spawn thread for connection #{connection_count} - panic occurred"
+                        );
+                        // Continue serving other connections even if one thread panics
+                    }
+                }
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    // No connection available, sleep briefly and check for shutdown
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+
+                eprintln!("Error accepting connection: {e}");
+                // Don't exit on connection errors, just log and continue
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+        }
+
+        // Periodic status update
+        if connection_count % 10 == 0 {
+            println!("ONVIF service is healthy - processed {connection_count} connections");
+        }
+    }
+
+    println!("ONVIF service listener loop ending due to shutdown request");
+    println!("Cleaning up resources...");
+
+    // Allow time for any in-flight connections to complete
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // We could wait for all client threads to finish here if we stored their handles
+
+    println!("ONVIF service shutdown complete");
+    Ok(())
+}
+
+/// Validate that the RTSP stream is accessible
+fn validate_rtsp_stream_connectivity(rtsp_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::{Command, Stdio};
+
+    println!("Testing RTSP stream: {}", rtsp_url);
+
+    // Use ffprobe to test the stream with a short timeout
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "quiet",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "csv=p=0",
+            "-timeout",
+            "10000000", // 10 seconds in microseconds
+            "-analyzeduration",
+            "5000000", // 5 seconds in microseconds
+            rtsp_url,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to execute ffprobe: {}", e))?;
+
+    if output.status.success() {
+        let codec = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !codec.is_empty() {
+            println!("RTSP stream is accessible (codec: {})", codec);
+            return Ok(());
+        }
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(format!("RTSP stream validation failed: {}", stderr).into())
 }
 
 fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -211,9 +573,21 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
     println!("Device UUID: {device_uuid}");
     println!("XAddrs: {}", ws_discovery_device_info.xaddrs);
 
+    // Validate IP address before starting WS-Discovery
+    if ws_container_ip.is_empty() || ws_container_ip == "0.0.0.0" {
+        return Err("Cannot start WS-Discovery with invalid container IP".into());
+    }
+
+    // Create a channel for monitoring thread status
+    let (status_tx, status_rx) = std::sync::mpsc::channel::<String>();
+
     let spawn_result = std::panic::catch_unwind(|| {
+        let status_tx = status_tx.clone();
         thread::spawn(move || {
             println!("WS-Discovery thread started");
+
+            // Send initial status update
+            let _ = status_tx.send("STARTING".to_string());
 
             // Add error handling and retry logic
             let mut attempts = 0;
@@ -223,19 +597,36 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
                 attempts += 1;
                 println!("WS-Discovery attempt {attempts} of {max_attempts}");
 
+                // Add a small delay between attempts to avoid rapid failures
+                if attempts > 1 {
+                    println!("Retrying WS-Discovery in 2 seconds...");
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+
                 match WSDiscoveryServer::new(ws_discovery_device_info.clone(), &ws_container_ip) {
                     Ok(mut server) => {
                         println!("WS-Discovery server created successfully on attempt {attempts}");
+                        // Send status update
+                        let _ = status_tx.send("RUNNING".to_string());
+
                         match server.start() {
                             Ok(_) => {
                                 println!("WS-Discovery server completed normally");
+                                let _ = status_tx.send("STOPPED".to_string());
                                 return; // Exit thread normally
                             }
                             Err(e) => {
                                 eprintln!("WS-Discovery server error on attempt {attempts}: {e}");
-                                if attempts < max_attempts {
-                                    println!("Retrying WS-Discovery in 2 seconds...");
-                                    std::thread::sleep(std::time::Duration::from_secs(2));
+                                // Send status update about error
+                                let error_msg = format!("ERROR: {}", e);
+                                let _ = status_tx.send(error_msg);
+
+                                // Don't retry if it's a configuration error
+                                if e.to_string().contains("Permission denied")
+                                    || e.to_string().contains("Address already in use")
+                                {
+                                    eprintln!("WS-Discovery configuration error - not retrying");
+                                    break;
                                 }
                             }
                         }
@@ -244,9 +635,16 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
                         eprintln!(
                             "Failed to create WS-Discovery server on attempt {attempts}: {e}"
                         );
-                        if attempts < max_attempts {
-                            println!("Retrying WS-Discovery creation in 2 seconds...");
-                            std::thread::sleep(std::time::Duration::from_secs(2));
+                        // Send status update about error
+                        let error_msg = format!("ERROR: {}", e);
+                        let _ = status_tx.send(error_msg);
+
+                        // Don't retry if it's a configuration error
+                        if e.to_string().contains("Invalid address")
+                            || e.to_string().contains("Permission denied")
+                        {
+                            eprintln!("WS-Discovery configuration error - not retrying");
+                            break;
                         }
                     }
                 }
@@ -255,6 +653,8 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
             eprintln!(
                 "WS-Discovery failed after {max_attempts} attempts - continuing without device discovery"
             );
+            // Send final status update
+            let _ = status_tx.send("FAILED".to_string());
             println!("WS-Discovery thread ending");
         })
     });
@@ -262,7 +662,67 @@ fn start_ws_discovery_server(config: &Config) -> Result<(), Box<dyn std::error::
     match spawn_result {
         Ok(handle) => {
             println!("WS-Discovery server thread started successfully");
-            std::mem::drop(handle); // Let it run independently
+
+            // Start a monitoring thread to keep track of the WS-Discovery thread status
+            let monitor_handle = thread::spawn(move || {
+                let mut last_status = String::new();
+                let mut consecutive_failures = 0;
+
+                loop {
+                    match status_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                        Ok(status) => {
+                            if status.starts_with("ERROR") || status == "FAILED" {
+                                eprintln!("WS-Discovery thread status: {}", status);
+                                consecutive_failures += 1;
+
+                                if consecutive_failures >= 3 {
+                                    eprintln!(
+                                        "WS-Discovery thread has reported multiple failures - service may be degraded"
+                                    );
+                                }
+                            } else {
+                                // Reset failure counter on successful status
+                                consecutive_failures = 0;
+
+                                if status != last_status {
+                                    println!("WS-Discovery thread status: {}", status);
+                                    last_status = status.to_string();
+                                }
+                            }
+
+                            if status == "STOPPED" {
+                                println!("WS-Discovery thread has stopped normally");
+                                break;
+                            }
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            // No status update received, thread might be stuck or dead
+                            eprintln!(
+                                "WARNING: No status update from WS-Discovery thread in 30 seconds"
+                            );
+                            consecutive_failures += 1;
+
+                            if consecutive_failures >= 3 {
+                                eprintln!(
+                                    "WS-Discovery thread appears to be unresponsive - service may be degraded"
+                                );
+                            }
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            eprintln!(
+                                "WS-Discovery monitoring channel disconnected - thread may have terminated"
+                            );
+                            break;
+                        }
+                    }
+                }
+
+                println!("WS-Discovery monitor thread ending");
+            });
+
+            // Store the handle but don't block on it
+            std::mem::drop(handle);
+            std::mem::drop(monitor_handle);
         }
         Err(_) => {
             eprintln!("Failed to start WS-Discovery thread - panic occurred");
@@ -1223,6 +1683,7 @@ fn send_snapshot_error_response(stream: &mut TcpStream) -> Result<(), Box<dyn st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn test_is_public_endpoint() {
@@ -1491,5 +1952,96 @@ Content-Type: application/soap+xml
         assert!(response.contains("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
         assert!(response.contains("<soap:Envelope"));
         assert!(response.contains("</soap:Envelope>"));
+    }
+    #[test]
+    fn test_service_status_shutdown_request() {
+        let status = Arc::new(ServiceStatus::new());
+
+        // Initially shutdown should not be requested
+        assert!(!status.is_shutdown_requested());
+
+        // Request shutdown
+        status.request_shutdown();
+
+        // Now shutdown should be requested
+        assert!(status.is_shutdown_requested());
+    }
+
+    #[test]
+    fn test_service_status_health_flags() {
+        let status = Arc::new(ServiceStatus::new());
+
+        // Initially both services should be marked unhealthy
+        assert!(!status.ws_discovery_healthy.load(Ordering::SeqCst));
+        assert!(!status.onvif_service_healthy.load(Ordering::SeqCst));
+
+        // Mark WS-Discovery as healthy
+        status.ws_discovery_healthy.store(true, Ordering::SeqCst);
+
+        // Check states
+        assert!(status.ws_discovery_healthy.load(Ordering::SeqCst));
+        assert!(!status.onvif_service_healthy.load(Ordering::SeqCst));
+
+        // Mark ONVIF service as healthy
+        status.onvif_service_healthy.store(true, Ordering::SeqCst);
+
+        // Both should now be healthy
+        assert!(status.ws_discovery_healthy.load(Ordering::SeqCst));
+        assert!(status.onvif_service_healthy.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_service_status_error_handling() {
+        let status = Arc::new(ServiceStatus::new());
+
+        // Initially there should be no error
+        assert!(status.last_error.lock().unwrap().is_none());
+
+        // Set an error
+        status.set_error("Test error message");
+
+        // Check that the error was stored
+        assert_eq!(
+            status.last_error.lock().unwrap().as_ref().unwrap(),
+            "Test error message"
+        );
+
+        // Set a different error
+        status.set_error("Another error");
+
+        // Check that the error was updated
+        assert_eq!(
+            status.last_error.lock().unwrap().as_ref().unwrap(),
+            "Another error"
+        );
+    }
+
+    #[test]
+    fn test_service_status_thread_safety() {
+        let status = Arc::new(ServiceStatus::new());
+        let status_clone = status.clone();
+
+        let thread = thread::spawn(move || {
+            // Set values in another thread
+            status_clone
+                .ws_discovery_healthy
+                .store(true, Ordering::SeqCst);
+            status_clone.set_error("Error from another thread");
+            status_clone.request_shutdown();
+
+            // Sleep to ensure the main thread has time to check
+            thread::sleep(Duration::from_millis(100));
+        });
+
+        // Wait for thread to complete
+        thread.join().unwrap();
+
+        // Check that changes are visible in the main thread
+        assert!(status.ws_discovery_healthy.load(Ordering::SeqCst));
+        assert!(status.is_shutdown_requested());
+        assert_eq!(
+            status.last_error.lock().unwrap().as_ref().unwrap(),
+            "Error from another thread"
+        );
     }
 }
