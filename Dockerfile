@@ -23,8 +23,8 @@ WORKDIR /app
 # Copy dependency files first (for Docker layer caching)
 COPY Cargo.toml Cargo.lock ./
 
-# Create a dummy main.rs to build dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+# Create a dummy main.rs and lib.rs to build dependencies
+RUN mkdir src && echo "fn main() {}" > src/main.rs && echo "// lib" > src/lib.rs
 
 # Build dependencies with cache mount (this will cache Rust dependencies)
 RUN --mount=type=cache,target=/app/target \
