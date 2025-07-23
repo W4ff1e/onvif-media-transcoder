@@ -23,3 +23,6 @@ sha1 = "0.10"
 image = "0.25.6"
 tempfile = "3.20.0"
 signal-hook = "0.3.18"
+
+[dev-dependencies]
+serial_test = "3.0"
