@@ -1,18 +1,15 @@
 use onvif_media_transcoder::Config;
-use std::env;
+use clap::Parser;
 
 #[test]
 fn test_ws_discovery_device_info_creation() {
-    // Set up environment variables
-    env::set_var("RTSP_STREAM_URL", "rtsp://127.0.0.1:8554/test");
-    env::set_var("ONVIF_PORT", "8080");
-    env::set_var("DEVICE_NAME", "Test-WS-Discovery-Device");
-    env::set_var("ONVIF_USERNAME", "testuser");
-    env::set_var("ONVIF_PASSWORD", "testpass");
-    env::set_var("CONTAINER_IP", "192.168.1.100");
-    env::set_var("WS_DISCOVERY_ENABLED", "true");
-
-    let config = Config::from_env().expect("Should create config from environment");
+    // Test with WS-Discovery enabled
+    let config = Config::try_parse_from(&[
+        "test-program",
+        "--device-name", "Test-WS-Discovery-Device",
+        "--container-ip", "192.168.1.100",
+        "--ws-discovery-enabled"
+    ]).expect("Should create config from args");
 
     // Test that WS-Discovery is enabled
     assert!(config.ws_discovery_enabled);
@@ -22,43 +19,30 @@ fn test_ws_discovery_device_info_creation() {
 
     // Test container IP for WS-Discovery
     assert_eq!(config.container_ip, "192.168.1.100");
-
-    // Clean up
-    cleanup_env_vars();
 }
 
 #[test]
 fn test_ws_discovery_disabled_config() {
-    // Set up environment variables with WS-Discovery disabled
-    env::set_var("RTSP_STREAM_URL", "rtsp://127.0.0.1:8554/test");
-    env::set_var("ONVIF_PORT", "8080");
-    env::set_var("DEVICE_NAME", "Test-Device");
-    env::set_var("ONVIF_USERNAME", "testuser");
-    env::set_var("ONVIF_PASSWORD", "testpass");
-    env::set_var("CONTAINER_IP", "192.168.1.100");
-    env::set_var("WS_DISCOVERY_ENABLED", "false");
+    // Test with WS-Discovery disabled (default behavior)
+    let config = Config::try_parse_from(&[
+        "test-program",
+        "--device-name", "Test-Device",
+        "--container-ip", "192.168.1.100"
+    ]).expect("Should create config from args");
 
-    let config = Config::from_env().expect("Should create config from environment");
-
-    // Test that WS-Discovery is disabled
+    // Test that WS-Discovery is disabled by default
     assert!(!config.ws_discovery_enabled);
-
-    // Clean up
-    cleanup_env_vars();
 }
 
 #[test]
 fn test_ws_discovery_xaddrs_format() {
-    // Set up environment variables
-    env::set_var("RTSP_STREAM_URL", "rtsp://127.0.0.1:8554/test");
-    env::set_var("ONVIF_PORT", "8080");
-    env::set_var("DEVICE_NAME", "Test-Device");
-    env::set_var("ONVIF_USERNAME", "testuser");
-    env::set_var("ONVIF_PASSWORD", "testpass");
-    env::set_var("CONTAINER_IP", "192.168.1.100");
-    env::set_var("WS_DISCOVERY_ENABLED", "true");
-
-    let config = Config::from_env().expect("Should create config from environment");
+    // Test XAddrs format construction with custom values
+    let config = Config::try_parse_from(&[
+        "test-program",
+        "--onvif-port", "8080",
+        "--container-ip", "192.168.1.100",
+        "--ws-discovery-enabled"
+    ]).expect("Should create config from args");
 
     // Test XAddrs format construction (how it would be used in WS-Discovery)
     let expected_xaddrs = format!(
@@ -70,9 +54,6 @@ fn test_ws_discovery_xaddrs_format() {
         expected_xaddrs,
         "http://192.168.1.100:8080/onvif/device_service"
     );
-
-    // Clean up
-    cleanup_env_vars();
 }
 
 #[test]
@@ -182,15 +163,4 @@ fn test_ws_discovery_multicast_address() {
     if let Ok(addr) = addr_result {
         assert!(addr.is_ipv4());
     }
-}
-
-// Helper function to clean up environment variables after tests
-fn cleanup_env_vars() {
-    env::remove_var("RTSP_STREAM_URL");
-    env::remove_var("ONVIF_PORT");
-    env::remove_var("DEVICE_NAME");
-    env::remove_var("ONVIF_USERNAME");
-    env::remove_var("ONVIF_PASSWORD");
-    env::remove_var("CONTAINER_IP");
-    env::remove_var("WS_DISCOVERY_ENABLED");
 }

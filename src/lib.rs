@@ -28,31 +28,31 @@ use ws_discovery::{DeviceInfo, WSDiscoveryServer};
 )]
 pub struct Config {
     /// RTSP stream URL to transcode
-    #[arg(long, default_value = "rtsp://127.0.0.1:8554/stream")]
+    #[arg(short = 'r', long, default_value = "rtsp://127.0.0.1:8554/stream")]
     pub rtsp_stream_url: String,
 
     /// Port for the ONVIF service
-    #[arg(long, default_value = "8080")]
+    #[arg(short = 'P', long, default_value = "8080")]
     pub onvif_port: String,
 
     /// Device name for ONVIF identification
-    #[arg(long, default_value = "ONVIF-Media-Transcoder")]
+    #[arg(short = 'n', long, default_value = "ONVIF-Media-Transcoder")]
     pub device_name: String,
 
     /// Username for ONVIF authentication
-    #[arg(long, default_value = "admin")]
+    #[arg(short = 'u', long, default_value = "admin")]
     pub onvif_username: String,
 
     /// Password for ONVIF authentication
-    #[arg(long, default_value = "onvif-rust")]
+    #[arg(short = 'p', long, default_value = "onvif-rust")]
     pub onvif_password: String,
 
     /// Container IP address for WS-Discovery
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long = "container-ip", short = 'i', default_value = "127.0.0.1")]
     pub container_ip: String,
 
     /// Enable WS-Discovery service
-    #[arg(long, action = clap::ArgAction::SetTrue)]
+    #[arg(long = "ws-discovery-enabled", short = 'w', action = clap::ArgAction::SetTrue)]
     pub ws_discovery_enabled: bool,
 }
 
@@ -132,7 +132,7 @@ impl Config {
             println!("  ONVIF Username: {}", self.onvif_username);
         }
 
-        if self.onvif_password == "onvif-password" {
+        if self.onvif_password == "onvif-rust" {
             println!("  ONVIF Password: [HIDDEN] (using default)");
         } else {
             println!("  ONVIF Password: [HIDDEN]");

@@ -173,14 +173,8 @@ echo "  ONVIF Username: ${ONVIF_USERNAME}"
 echo "  ONVIF Password: [HIDDEN]"
 echo "  WS-Discovery: ${WS_DISCOVERY_ENABLED}"
 
-# Export environment variables for Rust application
+# Calculate the RTSP stream URL for the Rust application
 export RTSP_STREAM_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
-export CONTAINER_IP="${CONTAINER_IP}"
-export ONVIF_PORT="${ONVIF_PORT}"
-export DEVICE_NAME="${DEVICE_NAME}"
-export ONVIF_USERNAME="${ONVIF_USERNAME}"
-export ONVIF_PASSWORD="${ONVIF_PASSWORD}"
-export WS_DISCOVERY_ENABLED="${WS_DISCOVERY_ENABLED}"
 
 # Function to manage MediaMTX logs with size capping
 manage_mediamtx_logs() {
@@ -320,7 +314,14 @@ fi
 
 # Start ONVIF service with direct stdout/stderr output
 echo "Starting ONVIF service..."
-/usr/local/bin/onvif-media-transcoder &
+/usr/local/bin/onvif-media-transcoder \
+    --rtsp-stream-url "${RTSP_STREAM_URL}" \
+    --onvif-port "${ONVIF_PORT}" \
+    --device-name "${DEVICE_NAME}" \
+    --onvif-username "${ONVIF_USERNAME}" \
+    --onvif-password "${ONVIF_PASSWORD}" \
+    --container-ip "${CONTAINER_IP}" \
+    $([ "$WS_DISCOVERY_ENABLED" = "true" ] && echo "--ws-discovery-enabled") &
 ONVIF_SERVICE_PID=$!
 
 # Give it a moment to start
