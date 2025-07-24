@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
+use clap::Parser;
 use sha1::Digest;
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
@@ -20,121 +21,140 @@ use onvif_responses::*;
 use ws_discovery::{DeviceInfo, WSDiscoveryServer};
 
 /// Configuration structure for the ONVIF Media Transcoder
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Parser)]
+#[command(name = "onvif-media-transcoder")]
+#[command(
+    about = "ONVIF Media Transcoder - Converts media streams to ONVIF-compatible RTSP streams"
+)]
 pub struct Config {
+    /// RTSP stream URL to transcode
+    #[arg(long, default_value = "rtsp://127.0.0.1:8554/stream")]
     pub rtsp_stream_url: String,
+
+    /// Port for the ONVIF service
+    #[arg(long, default_value = "8080")]
     pub onvif_port: String,
+
+    /// Device name for ONVIF identification
+    #[arg(long, default_value = "ONVIF-Media-Transcoder")]
     pub device_name: String,
+
+    /// Username for ONVIF authentication
+    #[arg(long, default_value = "admin")]
     pub onvif_username: String,
+
+    /// Password for ONVIF authentication
+    #[arg(long, default_value = "onvif-rust")]
     pub onvif_password: String,
+
+    /// Container IP address for WS-Discovery
+    #[arg(long, default_value = "127.0.0.1")]
     pub container_ip: String,
+
+    /// Enable WS-Discovery service
+    #[arg(long, action = clap::ArgAction::SetTrue)]
     pub ws_discovery_enabled: bool,
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
-        println!("Reading RTSP_STREAM_URL environment variable...");
-        let rtsp_stream_url = std::env::var("RTSP_STREAM_URL")
-            .map_err(|_| "RTSP_STREAM_URL environment variable must be set")?;
-        println!("RTSP_STREAM_URL: {rtsp_stream_url}");
+    pub fn from_args() -> Result<Self, Box<dyn std::error::Error>> {
+        println!("Parsing command-line arguments...");
+        let config = Config::parse();
 
-        println!("Reading ONVIF_PORT environment variable...");
-        let onvif_port = std::env::var("ONVIF_PORT")
-            .map_err(|_| "ONVIF_PORT environment variable must be set")?;
-        println!("ONVIF_PORT: {onvif_port}");
-
-        println!("Reading DEVICE_NAME environment variable...");
-        let device_name = std::env::var("DEVICE_NAME")
-            .map_err(|_| "DEVICE_NAME environment variable must be set")?;
-        println!("DEVICE_NAME: {device_name}");
-
-        println!("Reading ONVIF_USERNAME environment variable...");
-        let onvif_username = std::env::var("ONVIF_USERNAME")
-            .map_err(|_| "ONVIF_USERNAME environment variable must be set")?;
-        println!("ONVIF_USERNAME: {onvif_username}");
-
-        println!("Reading ONVIF_PASSWORD environment variable...");
-        let onvif_password = std::env::var("ONVIF_PASSWORD")
-            .map_err(|_| "ONVIF_PASSWORD environment variable must be set")?;
-        println!(
-            "ONVIF_PASSWORD: [HIDDEN] (length: {})",
-            onvif_password.len()
-        );
-
-        println!("Reading WS_DISCOVERY_ENABLED environment variable...");
-        let ws_discovery_enabled = std::env::var("WS_DISCOVERY_ENABLED")
-            .map_err(|_| "WS_DISCOVERY_ENABLED environment variable must be set")?
-            == "true";
-
-        if ws_discovery_enabled {
-            println!("WS-Discovery: ENABLED");
-        } else {
-            println!("WS-Discovery: DISABLED");
-        }
+        // Log when default values are used
+        println!("Configuration loaded from command-line arguments:");
 
         // Validate port number
         println!("Validating port number...");
-        let _: u16 = onvif_port
+        let _: u16 = config
+            .onvif_port
             .parse()
             .map_err(|_| "ONVIF_PORT must be a valid port number")?;
         println!("Port validation successful");
 
-        // Get the container IP for WS-Discovery with better validation
-        println!("Reading CONTAINER_IP environment variable...");
-        let container_ip = std::env::var("CONTAINER_IP").unwrap_or_else(|_| {
-            println!("Warning: CONTAINER_IP environment variable not set, using localhost");
-            "127.0.0.1".to_string()
-        });
-
         // Validate container IP is not empty
-        if container_ip.is_empty() {
+        if config.container_ip.is_empty() {
             return Err("CONTAINER_IP cannot be empty - container IP detection failed".into());
         }
 
         // Basic IP format validation
-        if container_ip.parse::<std::net::IpAddr>().is_err() {
-            return Err(
-                format!("CONTAINER_IP '{}' is not a valid IP address", container_ip).into(),
-            );
+        if config.container_ip.parse::<std::net::IpAddr>().is_err() {
+            return Err(format!(
+                "CONTAINER_IP '{}' is not a valid IP address",
+                config.container_ip
+            )
+            .into());
         }
 
-        println!("Container IP: {container_ip}");
+        println!("Container IP: {}", config.container_ip);
 
         // Validate RTSP stream URL format
-        if !rtsp_stream_url.starts_with("rtsp://") {
+        if !config.rtsp_stream_url.starts_with("rtsp://") {
             return Err(format!(
                 "RTSP_STREAM_URL must start with 'rtsp://', got: {}",
-                rtsp_stream_url
+                config.rtsp_stream_url
             )
             .into());
         }
 
         println!("Configuration creation completed successfully");
-        Ok(Config {
-            rtsp_stream_url: rtsp_stream_url,
-            onvif_port,
-            device_name,
-            onvif_username,
-            onvif_password,
-            container_ip,
-            ws_discovery_enabled,
-        })
+        Ok(config)
     }
 
     pub fn display(&self) {
         println!("Configuration:");
-        println!("  RTSP Input Stream: {}", self.rtsp_stream_url);
-        println!("  ONVIF Port: {}", self.onvif_port);
-        println!("  Device Name: {}", self.device_name);
-        println!("  ONVIF Username: {}", self.onvif_username);
-        println!("  ONVIF Password: [HIDDEN]");
-        println!("  Container IP: {}", self.container_ip);
+
+        // Check if default values are being used and log accordingly
+        if self.rtsp_stream_url == "rtsp://127.0.0.1:8554/stream" {
+            println!(
+                "  RTSP Input Stream: {} (using default)",
+                self.rtsp_stream_url
+            );
+        } else {
+            println!("  RTSP Input Stream: {}", self.rtsp_stream_url);
+        }
+
+        if self.onvif_port == "8080" {
+            println!("  ONVIF Port: {} (using default)", self.onvif_port);
+        } else {
+            println!("  ONVIF Port: {}", self.onvif_port);
+        }
+
+        if self.device_name == "ONVIF-Media-Transcoder" {
+            println!("  Device Name: {} (using default)", self.device_name);
+        } else {
+            println!("  Device Name: {}", self.device_name);
+        }
+
+        if self.onvif_username == "admin" {
+            println!("  ONVIF Username: {} (using default)", self.onvif_username);
+        } else {
+            println!("  ONVIF Username: {}", self.onvif_username);
+        }
+
+        if self.onvif_password == "onvif-password" {
+            println!("  ONVIF Password: [HIDDEN] (using default)");
+        } else {
+            println!("  ONVIF Password: [HIDDEN]");
+        }
+
+        if self.container_ip == "127.0.0.1" {
+            println!("  Container IP: {} (using default)", self.container_ip);
+        } else {
+            println!("  Container IP: {}", self.container_ip);
+        }
+
         println!(
-            "  WS-Discovery: {}",
+            "  WS-Discovery: {} {}",
             if self.ws_discovery_enabled {
                 "ENABLED"
             } else {
                 "DISABLED"
+            },
+            if !self.ws_discovery_enabled {
+                "(default: disabled, use --ws-discovery-enabled to enable)"
+            } else {
+                ""
             }
         );
     }

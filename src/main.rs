@@ -32,9 +32,9 @@ fn main() {
     let status_for_signal = service_status.clone();
     setup_signal_handlers(status_for_signal);
 
-    // Load configuration from environment variables
-    println!("Loading configuration from environment variables...");
-    let config = match Config::from_env() {
+    // Load configuration from command-line arguments
+    println!("Loading configuration from command-line arguments...");
+    let config = match Config::from_args() {
         Ok(config) => {
             println!("Configuration loaded successfully");
             config
