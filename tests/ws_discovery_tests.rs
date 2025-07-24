@@ -1,15 +1,18 @@
-use onvif_media_transcoder::Config;
 use clap::Parser;
+use onvif_media_transcoder::Config;
 
 #[test]
 fn test_ws_discovery_device_info_creation() {
     // Test with WS-Discovery enabled
     let config = Config::try_parse_from(&[
         "test-program",
-        "--device-name", "Test-WS-Discovery-Device",
-        "--container-ip", "192.168.1.100",
-        "--ws-discovery-enabled"
-    ]).expect("Should create config from args");
+        "--device-name",
+        "Test-WS-Discovery-Device",
+        "--container-ip",
+        "192.168.1.100",
+        "--ws-discovery-enabled",
+    ])
+    .expect("Should create config from args");
 
     // Test that WS-Discovery is enabled
     assert!(config.ws_discovery_enabled);
@@ -26,9 +29,12 @@ fn test_ws_discovery_disabled_config() {
     // Test with WS-Discovery disabled (default behavior)
     let config = Config::try_parse_from(&[
         "test-program",
-        "--device-name", "Test-Device",
-        "--container-ip", "192.168.1.100"
-    ]).expect("Should create config from args");
+        "--device-name",
+        "Test-Device",
+        "--container-ip",
+        "192.168.1.100",
+    ])
+    .expect("Should create config from args");
 
     // Test that WS-Discovery is disabled by default
     assert!(!config.ws_discovery_enabled);
@@ -39,10 +45,13 @@ fn test_ws_discovery_xaddrs_format() {
     // Test XAddrs format construction with custom values
     let config = Config::try_parse_from(&[
         "test-program",
-        "--onvif-port", "8080",
-        "--container-ip", "192.168.1.100",
-        "--ws-discovery-enabled"
-    ]).expect("Should create config from args");
+        "--onvif-port",
+        "8080",
+        "--container-ip",
+        "192.168.1.100",
+        "--ws-discovery-enabled",
+    ])
+    .expect("Should create config from args");
 
     // Test XAddrs format construction (how it would be used in WS-Discovery)
     let expected_xaddrs = format!(

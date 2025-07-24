@@ -1,12 +1,12 @@
+use clap::Parser;
 use onvif_media_transcoder::{Config, ServiceStatus};
 use std::sync::Arc;
-use clap::Parser;
 
 #[test]
 fn test_config_with_defaults() {
     // Test with default values by parsing empty args (just program name)
     let config = Config::try_parse_from(&["test-program"]).unwrap();
-    
+
     assert_eq!(config.rtsp_stream_url, "rtsp://127.0.0.1:8554/stream");
     assert_eq!(config.onvif_port, "8080");
     assert_eq!(config.device_name, "ONVIF-Media-Transcoder");
@@ -21,15 +21,22 @@ fn test_config_with_custom_values() {
     // Test with custom values
     let config = Config::try_parse_from(&[
         "test-program",
-        "--rtsp-stream-url", "rtsp://192.168.1.100:554/stream",
-        "--onvif-port", "9090",
-        "--device-name", "Custom-Camera",
-        "--onvif-username", "testuser",
-        "--onvif-password", "testpass",
-        "--container-ip", "192.168.1.50",
-        "--ws-discovery-enabled"
-    ]).unwrap();
-    
+        "--rtsp-stream-url",
+        "rtsp://192.168.1.100:554/stream",
+        "--onvif-port",
+        "9090",
+        "--device-name",
+        "Custom-Camera",
+        "--onvif-username",
+        "testuser",
+        "--onvif-password",
+        "testpass",
+        "--container-ip",
+        "192.168.1.50",
+        "--ws-discovery-enabled",
+    ])
+    .unwrap();
+
     assert_eq!(config.rtsp_stream_url, "rtsp://192.168.1.100:554/stream");
     assert_eq!(config.onvif_port, "9090");
     assert_eq!(config.device_name, "Custom-Camera");
@@ -42,14 +49,11 @@ fn test_config_with_custom_values() {
 #[test]
 fn test_config_validation_invalid_port() {
     // Test with invalid port
-    let result = Config::try_parse_from(&[
-        "test-program",
-        "--onvif-port", "99999"
-    ]);
-    
+    let result = Config::try_parse_from(&["test-program", "--onvif-port", "99999"]);
+
     // Should parse successfully (clap doesn't validate the port format)
     assert!(result.is_ok());
-    
+
     // But validation should fail when we try to validate
     let config = result.unwrap();
     let validation_result: Result<u16, _> = config.onvif_port.parse();
@@ -59,11 +63,9 @@ fn test_config_validation_invalid_port() {
 #[test]
 fn test_config_validation_invalid_ip() {
     // Test with invalid IP
-    let config = Config::try_parse_from(&[
-        "test-program",
-        "--container-ip", "invalid.ip.address"
-    ]).unwrap();
-    
+    let config =
+        Config::try_parse_from(&["test-program", "--container-ip", "invalid.ip.address"]).unwrap();
+
     // IP validation should fail
     let validation_result = config.container_ip.parse::<std::net::IpAddr>();
     assert!(validation_result.is_err());
@@ -74,9 +76,11 @@ fn test_config_validation_invalid_rtsp_url() {
     // Test with invalid RTSP URL (should start with rtsp://)
     let config = Config::try_parse_from(&[
         "test-program",
-        "--rtsp-stream-url", "http://127.0.0.1:8554/test"
-    ]).unwrap();
-    
+        "--rtsp-stream-url",
+        "http://127.0.0.1:8554/test",
+    ])
+    .unwrap();
+
     // URL validation should fail (doesn't start with rtsp://)
     assert!(!config.rtsp_stream_url.starts_with("rtsp://"));
 }
@@ -86,16 +90,19 @@ fn test_config_with_partial_custom_values() {
     // Test with only some custom values, others should be defaults
     let config = Config::try_parse_from(&[
         "test-program",
-        "--onvif-port", "9090",
-        "--device-name", "Custom-Camera",
-        "--ws-discovery-enabled"
-    ]).unwrap();
-    
+        "--onvif-port",
+        "9090",
+        "--device-name",
+        "Custom-Camera",
+        "--ws-discovery-enabled",
+    ])
+    .unwrap();
+
     // Custom values
     assert_eq!(config.onvif_port, "9090");
     assert_eq!(config.device_name, "Custom-Camera");
     assert_eq!(config.ws_discovery_enabled, true);
-    
+
     // Default values
     assert_eq!(config.rtsp_stream_url, "rtsp://127.0.0.1:8554/stream");
     assert_eq!(config.onvif_username, "admin");
@@ -106,10 +113,7 @@ fn test_config_with_partial_custom_values() {
 #[test]
 fn test_config_display() {
     // Test that display() doesn't panic
-    let config = Config::try_parse_from(&[
-        "test-program",
-        "--device-name", "Test-Device"
-    ]).unwrap();
+    let config = Config::try_parse_from(&["test-program", "--device-name", "Test-Device"]).unwrap();
 
     // This test mainly ensures display() doesn't panic
     config.display();
