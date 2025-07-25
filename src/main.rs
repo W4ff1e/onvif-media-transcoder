@@ -46,6 +46,10 @@ struct Config {
     /// Enable WS-Discovery service (currently disabled)
     #[arg(long = "ws-discovery-enabled", short = 'w', action = clap::ArgAction::SetTrue)]
     ws_discovery_enabled: bool,
+
+    /// Enable debug mode with verbose request logging (NOT FOR PRODUCTION USE, LOGS SENSITIVE INFORMATION)
+    #[arg(short = 'd', long = "debug", action = clap::ArgAction::SetTrue)]
+    debug: bool,
 }
 
 impl Config {
@@ -140,6 +144,12 @@ impl Config {
             },
             "(WS-Discovery functionality is currently commented out for simplicity)"
         );
+
+        if self.debug {
+            println!("  Debug Mode: ENABLED (verbose request logging)");
+        } else {
+            println!("  Debug Mode: DISABLED");
+        }
     }
 }
 
@@ -274,11 +284,8 @@ fn handle_onvif_request(
     {
         println!("  Authentication failed - sending 401 response");
 
-        // Print first few lines of request for debugging
-        println!("  Request headers (first 10 lines):");
-        for (i, line) in request.lines().take(10).enumerate() {
-            println!("    {}: {}", i + 1, line);
-        }
+        // Debug dump for authentication failures
+        dump_headers(&request, size, "AUTH_FAILED", config.debug);
 
         send_auth_required_response(&mut stream)?;
         return Ok(());
@@ -291,59 +298,121 @@ fn handle_onvif_request(
     // Handle ONVIF endpoints
     if request.contains("GetCapabilities") {
         println!("Handling supported endpoint: GetCapabilities");
+        dump_headers(&request, size, "GetCapabilities", config.debug);
         send_capabilities_response(&mut stream, &config.container_ip, &config.onvif_port)?;
     } else if request.contains("GetServices") {
         println!("Handling supported endpoint: GetServices");
+        dump_headers(&request, size, "GetServices", config.debug);
         send_services_response(&mut stream, &config.container_ip, &config.onvif_port)?;
     } else if request.contains("GetSystemDateAndTime") {
         println!("Handling supported endpoint: GetSystemDateAndTime");
+        dump_headers(&request, size, "GetSystemDateAndTime", config.debug);
         send_system_date_time_response(&mut stream)?;
     } else if request.contains("GetProfiles") {
         println!("Handling supported endpoint: GetProfiles");
+        dump_headers(&request, size, "GetProfiles", config.debug);
         send_profiles_response(&mut stream, &config.rtsp_stream_url)?;
     } else if request.contains("GetStreamUri") {
         println!("Handling supported endpoint: GetStreamUri");
+        dump_headers(&request, size, "GetStreamUri", config.debug);
         send_stream_uri_response(&mut stream, &config.rtsp_stream_url)?;
     } else if request.contains("GetSnapshotUri") {
         println!("Handling supported endpoint: GetSnapshotUri");
+        dump_headers(&request, size, "GetSnapshotUri", config.debug);
         send_snapshot_uri_response(&mut stream, &config.container_ip, &config.onvif_port)?;
     } else if request.contains("GetDeviceInformation") {
         println!("Handling supported endpoint: GetDeviceInformation");
+        dump_headers(&request, size, "GetDeviceInformation", config.debug);
         send_device_info_response(&mut stream, &config.device_name)?;
     } else if request.contains("GetVideoSources") {
         println!("Handling supported endpoint: GetVideoSources");
+        dump_headers(&request, size, "GetVideoSources", config.debug);
         send_video_sources_response(&mut stream)?;
     } else if request.contains("GetVideoSourceConfigurations") {
         println!("Handling supported endpoint: GetVideoSourceConfigurations");
+        dump_headers(&request, size, "GetVideoSourceConfigurations", config.debug);
         send_video_source_configurations_response(&mut stream)?;
     } else if request.contains("GetVideoEncoderConfigurations") {
         println!("Handling supported endpoint: GetVideoEncoderConfigurations");
+        dump_headers(
+            &request,
+            size,
+            "GetVideoEncoderConfigurations",
+            config.debug,
+        );
         send_video_encoder_configurations_response(&mut stream)?;
     } else if request.contains("GetAudioSourceConfigurations") {
         println!("Handling supported endpoint: GetAudioSourceConfigurations");
+        dump_headers(&request, size, "GetAudioSourceConfigurations", config.debug);
         send_audio_source_configurations_response(&mut stream)?;
     } else if request.contains("GetAudioEncoderConfigurations") {
         println!("Handling supported endpoint: GetAudioEncoderConfigurations");
+        dump_headers(
+            &request,
+            size,
+            "GetAudioEncoderConfigurations",
+            config.debug,
+        );
         send_audio_encoder_configurations_response(&mut stream)?;
     } else if request.contains("GetServiceCapabilities") {
         println!("Handling supported endpoint: GetServiceCapabilities");
+        dump_headers(&request, size, "GetServiceCapabilities", config.debug);
         send_service_capabilities_response(&mut stream)?;
     } else if request.contains("GET /snapshot.jpg") {
         println!("Handling snapshot request: GET /snapshot.jpg");
+        dump_headers(&request, size, "snapshot.jpg", config.debug);
         send_snapshot_image_response(&mut stream, &config.rtsp_stream_url)?;
     } else {
         // Detect and log unsupported ONVIF endpoints
         let unsupported_endpoint = detect_unsupported_onvif_endpoint(&request);
         if let Some(endpoint) = unsupported_endpoint {
             eprintln!("UNSUPPORTED ONVIF ENDPOINT: {endpoint}");
+            dump_headers(
+                &request,
+                size,
+                &format!("UNSUPPORTED_{}", endpoint),
+                config.debug,
+            );
             send_unsupported_endpoint_response(&mut stream, &endpoint)?;
         } else {
             println!("Unknown request type: {first_line}");
+            dump_headers(&request, size, "UNKNOWN", config.debug);
             send_default_response(&mut stream)?;
         }
     }
 
     Ok(())
+}
+
+/// Debug function to dump request headers and content for troubleshooting
+fn dump_headers(request: &str, size: usize, endpoint_name: &str, debug_enabled: bool) {
+    if !debug_enabled {
+        return;
+    }
+
+    println!(
+        "=== DEBUG REQUEST DUMP FOR {} ===",
+        endpoint_name.to_uppercase()
+    );
+    println!("Request size: {} bytes", size);
+    println!("Raw request:");
+    println!("{}", "=".repeat(50));
+    println!("{}", request);
+    println!("{}", "=".repeat(50));
+
+    // Parse and display headers separately for easier reading
+    println!("Parsed headers:");
+    for (i, line) in request.lines().enumerate() {
+        if line.is_empty() {
+            println!("  [{}]: <EMPTY LINE - Headers end here>", i + 1);
+            break;
+        }
+        println!("  [{}]: {}", i + 1, line);
+    }
+    println!(
+        "=== END DEBUG REQUEST DUMP FOR {} ===",
+        endpoint_name.to_uppercase()
+    );
 }
 
 fn send_http_response(
