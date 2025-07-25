@@ -136,13 +136,12 @@ impl Config {
         }
 
         println!(
-            "  WS-Discovery: {} {}",
+            "  WS-Discovery: {} (WS-Discovery functionality is currently commented out for simplicity)",
             if self.ws_discovery_enabled {
                 "ENABLED (COMMENTED OUT)"
             } else {
                 "DISABLED"
-            },
-            "(WS-Discovery functionality is currently commented out for simplicity)"
+            }
         );
 
         if self.debug {
@@ -227,7 +226,7 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
 
                 // Handle request directly in main thread (simplified)
                 if let Err(e) = handle_onvif_request(stream, config) {
-                    eprintln!("Error handling connection #{}: {}", connection_count, e);
+                    eprintln!("Error handling connection #{connection_count}: {e}");
                 }
             }
             Err(e) => {
@@ -278,7 +277,7 @@ fn handle_onvif_request(
 
     // Check for authentication
     let requires_auth = !is_public_endpoint(&request);
-    println!("  Authentication required: {}", requires_auth);
+    println!("  Authentication required: {requires_auth}");
 
     if requires_auth && !is_authenticated(&request, &config.onvif_username, &config.onvif_password)
     {
@@ -370,7 +369,7 @@ fn handle_onvif_request(
             dump_headers(
                 &request,
                 size,
-                &format!("UNSUPPORTED_{}", endpoint),
+                &format!("UNSUPPORTED_{endpoint}"),
                 config.debug,
             );
             send_unsupported_endpoint_response(&mut stream, &endpoint)?;
@@ -394,10 +393,10 @@ fn dump_headers(request: &str, size: usize, endpoint_name: &str, debug_enabled: 
         "=== DEBUG REQUEST DUMP FOR {} ===",
         endpoint_name.to_uppercase()
     );
-    println!("Request size: {} bytes", size);
+    println!("Request size: {size} bytes");
     println!("Raw request:");
     println!("{}", "=".repeat(50));
-    println!("{}", request);
+    println!("{request}");
     println!("{}", "=".repeat(50));
 
     // Parse and display headers separately for easier reading
@@ -477,15 +476,15 @@ fn is_public_endpoint(request: &str) -> bool {
     for endpoint in &public_endpoints {
         // Check various patterns where the endpoint might appear
         if request.contains(endpoint)
-            || request.contains(&format!("<{}>", endpoint))
-            || request.contains(&format!("<{}/>", endpoint))
-            || request.contains(&format!(":{}", endpoint))
-            || request.contains(&format!("<{} ", endpoint))
-            || request.contains(&format!("tds:{}", endpoint))
-            || request.contains(&format!("trt:{}", endpoint))
-            || request.contains(&format!("soap:{}", endpoint))
+            || request.contains(&format!("<{endpoint}>"))
+            || request.contains(&format!("<{endpoint}/>"))
+            || request.contains(&format!(":{endpoint}"))
+            || request.contains(&format!("<{endpoint} "))
+            || request.contains(&format!("tds:{endpoint}"))
+            || request.contains(&format!("trt:{endpoint}"))
+            || request.contains(&format!("soap:{endpoint}"))
         {
-            println!("  Detected public endpoint: {}", endpoint);
+            println!("  Detected public endpoint: {endpoint}");
             return true;
         }
     }
@@ -596,8 +595,7 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
         let provided_username = &request[user_start + 10..user_end];
         if provided_username != username {
             println!(
-                "  WS-Security: Username mismatch. Expected: {}, Got: {}",
-                username, provided_username
+                "  WS-Security: Username mismatch. Expected: {username}, Got: {provided_username}"
             );
             return false;
         }
@@ -654,44 +652,44 @@ fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> b
                     let digest = hasher.finalize();
                     let expected_digest = general_purpose::STANDARD.encode(digest);
 
-                    println!("  Expected digest: {}", expected_digest);
-                    println!("  Provided digest: {}", password_value);
+                    println!("  Expected digest: {expected_digest}");
+                    println!("  Provided digest: {password_value}");
 
                     if password_value == expected_digest {
                         println!("  WS-Security: Authentication successful");
-                        return true;
+                        true
                     } else {
                         println!("  WS-Security: Authentication failed - digest mismatch");
-                        return false;
+                        false
                     }
                 } else {
                     println!("  WS-Security: Using plain text password");
                     if password_value == password {
                         println!("  WS-Security: Authentication successful");
-                        return true;
+                        true
                     } else {
                         println!("  WS-Security: Authentication failed - password mismatch");
-                        return false;
+                        false
                     }
                 }
             } else {
                 println!("  WS-Security: Malformed Password element - no closing tag");
-                return false;
+                false
             }
         } else {
             println!("  WS-Security: Malformed Password element - no closing >");
-            return false;
+            false
         }
     } else {
         println!("  WS-Security: No Password element found");
-        return false;
+        false
     }
 }
 
 fn extract_ws_security_element(request: &str, element_name: &str) -> Option<String> {
     // Look for opening tag with various prefixes and potential attributes
     for prefix in ["", "wsu:", "wsse:", "s:", "soap:"] {
-        let tag_start = format!("<{}{}", prefix, element_name);
+        let tag_start = format!("<{prefix}{element_name}");
 
         if let Some(open_pos) = request.find(&tag_start) {
             // Find the end of the opening tag (either > or space)
@@ -702,18 +700,18 @@ fn extract_ws_security_element(request: &str, element_name: &str) -> Option<Stri
             };
 
             // Look for the closing tag
-            let close_tag = format!("</{}{}>", prefix, element_name);
+            let close_tag = format!("</{prefix}{element_name}>");
             if let Some(close_pos) = request[content_start..].find(&close_tag) {
                 let content_end = content_start + close_pos;
                 let content = request[content_start..content_end].trim();
 
-                println!("  Found {}: '{}'", element_name, content);
+                println!("  Found {element_name}: '{content}'");
                 return Some(content.to_string());
             }
         }
     }
 
-    println!("  Could not find element: {}", element_name);
+    println!("  Could not find element: {element_name}");
     None
 }
 
@@ -831,7 +829,7 @@ fn send_snapshot_image_response(
     stream: &mut TcpStream,
     rtsp_stream_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Capturing snapshot from RTSP stream: {}", rtsp_stream_url);
+    println!("Capturing snapshot from RTSP stream: {rtsp_stream_url}");
 
     match capture_rtsp_snapshot(rtsp_stream_url) {
         Ok(image_data) => {
@@ -842,7 +840,7 @@ fn send_snapshot_image_response(
             send_image_response(stream, &image_data)
         }
         Err(e) => {
-            eprintln!("Failed to capture snapshot: {}", e);
+            eprintln!("Failed to capture snapshot: {e}");
             send_error_response(stream, "Failed to capture snapshot")
         }
     }
@@ -856,7 +854,7 @@ fn capture_rtsp_snapshot(rtsp_url: &str) -> Result<Vec<u8>, Box<dyn std::error::
     let temp_file = NamedTempFile::new()?;
     let temp_path = temp_file.path();
 
-    println!("Using temporary file: {:?}", temp_path);
+    println!("Using temporary file: {temp_path:?}");
 
     // Use FFmpeg to capture a single frame from the RTSP stream
     let output = Command::new("ffmpeg")
@@ -878,7 +876,7 @@ fn capture_rtsp_snapshot(rtsp_url: &str) -> Result<Vec<u8>, Box<dyn std::error::
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("FFmpeg failed: {}", stderr).into());
+        return Err(format!("FFmpeg failed: {stderr}").into());
     }
 
     // Read the captured image file
@@ -914,7 +912,7 @@ fn send_error_response(
     stream: &mut TcpStream,
     error_message: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let body = format!("Error: {}", error_message);
+    let body = format!("Error: {error_message}");
     send_http_response(stream, "500 Internal Server Error", "text/plain", &body)
 }
 
