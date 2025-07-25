@@ -328,6 +328,9 @@ fn handle_onvif_request(
     } else if request.contains("GetServiceCapabilities") {
         println!("Handling supported endpoint: GetServiceCapabilities");
         send_service_capabilities_response(&mut stream)?;
+    } else if request.contains("GET /snapshot.jpg") {
+        println!("Handling snapshot request: GET /snapshot.jpg");
+        send_snapshot_image_response(&mut stream, &config.rtsp_stream_url)?;
     } else {
         // Detect and log unsupported ONVIF endpoints
         let unsupported_endpoint = detect_unsupported_onvif_endpoint(&request);
@@ -753,6 +756,97 @@ fn send_audio_encoder_configurations_response(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let body = get_audio_encoder_configurations_response();
     send_soap_response(stream, &body)
+}
+
+fn send_snapshot_image_response(
+    stream: &mut TcpStream,
+    rtsp_stream_url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Capturing snapshot from RTSP stream: {}", rtsp_stream_url);
+
+    match capture_rtsp_snapshot(rtsp_stream_url) {
+        Ok(image_data) => {
+            println!(
+                "Successfully captured snapshot ({} bytes)",
+                image_data.len()
+            );
+            send_image_response(stream, &image_data)
+        }
+        Err(e) => {
+            eprintln!("Failed to capture snapshot: {}", e);
+            send_error_response(stream, "Failed to capture snapshot")
+        }
+    }
+}
+
+fn capture_rtsp_snapshot(rtsp_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use std::process::Command;
+    use tempfile::NamedTempFile;
+
+    // Create a temporary file for the snapshot
+    let temp_file = NamedTempFile::new()?;
+    let temp_path = temp_file.path();
+
+    println!("Using temporary file: {:?}", temp_path);
+
+    // Use FFmpeg to capture a single frame from the RTSP stream
+    let output = Command::new("ffmpeg")
+        .args([
+            "-rtsp_transport",
+            "tcp", // Use TCP for more reliable connection
+            "-i",
+            rtsp_url, // Input RTSP stream
+            "-vframes",
+            "1", // Capture only 1 frame
+            "-q:v",
+            "2", // High quality JPEG
+            "-f",
+            "image2",                    // Force image2 format
+            "-y",                        // Overwrite output file
+            temp_path.to_str().unwrap(), // Output file
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFmpeg failed: {}", stderr).into());
+    }
+
+    // Read the captured image file
+    let image_data = std::fs::read(temp_path)?;
+
+    if image_data.is_empty() {
+        return Err("Captured image is empty".into());
+    }
+
+    println!("FFmpeg capture successful");
+    Ok(image_data)
+}
+
+fn send_image_response(
+    stream: &mut TcpStream,
+    image_data: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
+        image_data.len()
+    );
+
+    // Send HTTP headers
+    stream.write_all(response.as_bytes())?;
+
+    // Send image data
+    stream.write_all(image_data)?;
+
+    Ok(())
+}
+
+fn send_error_response(
+    stream: &mut TcpStream,
+    error_message: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let body = format!("Error: {}", error_message);
+    send_http_response(stream, "500 Internal Server Error", "text/plain", &body)
 }
 
 fn detect_unsupported_onvif_endpoint(request: &str) -> Option<String> {
