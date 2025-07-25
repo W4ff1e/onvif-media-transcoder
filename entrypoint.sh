@@ -101,6 +101,33 @@ validate_env() {
         esac
     fi
     
+    # Validate and normalize DEBUGLOGGING
+    if [ -z "$DEBUGLOGGING" ]; then
+        DEBUGLOGGING="false"  # Default to false when not set
+        export DEBUGLOGGING
+        echo "INFO: Debug logging is DISABLED (default)"
+    else
+        # Normalize and validate DEBUGLOGGING value
+        DEBUGLOGGING=$(echo "$DEBUGLOGGING" | tr '[:upper:]' '[:lower:]')
+        case "$DEBUGLOGGING" in
+            "true"|"1"|"yes"|"on"|"enabled")
+                DEBUGLOGGING="true"
+                export DEBUGLOGGING
+                echo "INFO: Debug logging is ENABLED"
+                ;;
+            "false"|"0"|"no"|"off"|"disabled")
+                DEBUGLOGGING="false"
+                export DEBUGLOGGING
+                echo "INFO: Debug logging is DISABLED"
+                ;;
+            *)
+                echo "ERROR: DEBUGLOGGING must be 'true' or 'false' (case insensitive), got: $DEBUGLOGGING"
+                echo "       Accepted values: true/false, 1/0, yes/no, on/off, enabled/disabled"
+                errors=$((errors + 1))
+                ;;
+        esac
+    fi
+    
     # Validate INPUT_URL format (MediaMTX supports many protocols)
     if [ -n "$INPUT_URL" ]; then
         # Check if it's a valid URL/path format that MediaMTX can handle
@@ -321,7 +348,8 @@ echo "Starting ONVIF service..."
     --onvif-username "${ONVIF_USERNAME}" \
     --onvif-password "${ONVIF_PASSWORD}" \
     --container-ip "${CONTAINER_IP}" \
-    $([ "$WS_DISCOVERY_ENABLED" = "true" ] && echo "--ws-discovery-enabled") &
+    $([ "$WS_DISCOVERY_ENABLED" = "true" ] && echo "--ws-discovery-enabled") \
+    $([ "$DEBUGLOGGING" = "true" ] && echo "--debug") &
 ONVIF_SERVICE_PID=$!
 
 # Give it a moment to start

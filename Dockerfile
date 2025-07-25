@@ -91,6 +91,7 @@ ENV DEVICE_NAME="ONVIF-Media-Transcoder"
 ENV ONVIF_USERNAME="admin"
 ENV ONVIF_PASSWORD="onvif-rust"
 ENV WS_DISCOVERY_ENABLED="true"
+ENV DEBUGLOGGING="false"
 
 # Expose the ports (TCP for ONVIF, UDP for WS-Discovery) - respects build-time configuration
 EXPOSE ${ONVIF_PORT} ${RTSP_OUTPUT_PORT} 3702/udp
