@@ -57,9 +57,6 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 <tt:RTP_RTSP_TCP>true</tt:RTP_RTSP_TCP>
 </tt:StreamingCapabilities>
 </tt:Media>
-<tt:PTZ xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
-</tt:PTZ>
 </tds:Capabilities>
 </tds:GetCapabilitiesResponse>
 </soap:Body>

@@ -471,6 +471,7 @@ fn is_public_endpoint(request: &str) -> bool {
         "GetServices",
         "GetSystemDateAndTime",
         "GetServiceCapabilities",
+        "snapshot.jpg",
     ];
 
     for endpoint in &public_endpoints {
@@ -895,16 +896,25 @@ fn send_image_response(
     image_data: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\nAccept-Ranges: bytes\r\nContent-Disposition: inline; filename=\"snapshot.jpg\"\r\n\r\n",
         image_data.len()
     );
 
     // Send HTTP headers
     stream.write_all(response.as_bytes())?;
+    stream.flush()?;
 
     // Send image data
     stream.write_all(image_data)?;
+    stream.flush()?;
 
+    // Properly shutdown the connection to signal end of response
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+
+    println!(
+        "Sent snapshot response with {} bytes of image data",
+        image_data.len()
+    );
     Ok(())
 }
 
