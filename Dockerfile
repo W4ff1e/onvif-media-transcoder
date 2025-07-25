@@ -61,10 +61,7 @@ ARG TARGETARCH
 ARG MEDIAMTX_VERSION=v1.13.0
 
 # Install runtime dependencies including image processing libraries
-RUN apk add --no-cache \
-    curl \
-    ffmpeg \
-    musl-dev
+RUN apk add --no-cache curl ffmpeg musl-dev
 
 # Download and install MediaMTX (architecture-aware)
 RUN case ${TARGETARCH} in \
