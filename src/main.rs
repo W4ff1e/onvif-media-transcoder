@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use clap::Parser;
+use sha1::Digest;
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
 
@@ -267,12 +268,24 @@ fn handle_onvif_request(
 
     // Check for authentication
     let requires_auth = !is_public_endpoint(&request);
+    println!("  Authentication required: {}", requires_auth);
 
     if requires_auth && !is_authenticated(&request, &config.onvif_username, &config.onvif_password)
     {
-        println!("  Authentication required - sending 401 response");
+        println!("  Authentication failed - sending 401 response");
+
+        // Print first few lines of request for debugging
+        println!("  Request headers (first 10 lines):");
+        for (i, line) in request.lines().take(10).enumerate() {
+            println!("    {}: {}", i + 1, line);
+        }
+
         send_auth_required_response(&mut stream)?;
         return Ok(());
+    } else if requires_auth {
+        println!("  Authentication successful");
+    } else {
+        println!("  Public endpoint - no authentication required");
     }
 
     // Handle ONVIF endpoints
@@ -356,38 +369,57 @@ fn send_soap_response(
 }
 
 fn is_authenticated(request: &str, username: &str, password: &str) -> bool {
-    // Check for Basic Auth first
+    println!("  Starting authentication validation...");
+
+    // Check for Basic Auth first (simpler)
     if let Some(auth_header) = extract_authorization_header(request) {
         if auth_header.starts_with("Basic ") {
+            println!("  Attempting Basic Auth validation...");
             return validate_basic_auth(&auth_header, username, password);
+        } else if auth_header.starts_with("Digest ") {
+            println!("  Attempting Digest Auth validation...");
+            return validate_digest_auth(&auth_header, request, username, password);
         }
     }
 
-    // Check for WS-Security Username Token
+    // Check for WS-Security Username Token (Digest)
     if request.contains("<UsernameToken>") && request.contains("<Username>") {
+        println!("  Found WS-Security UsernameToken, attempting validation...");
         return validate_ws_security_auth(request, username, password);
     }
 
+    println!("  No valid authentication method found");
     false
 }
 
 fn is_public_endpoint(request: &str) -> bool {
     // Allow certain endpoints without authentication for ONVIF discovery
-    request.contains("GetCapabilities")
-        || request.contains("GetDeviceInformation")
-        || request.contains("GetServices")
-        || request.contains("GetSystemDateAndTime")
-        || request.contains("GetServiceCapabilities")
-        || request.contains("<GetCapabilities")
-        || request.contains("<GetDeviceInformation")
-        || request.contains("<GetServices")
-        || request.contains("<GetSystemDateAndTime")
-        || request.contains("<GetServiceCapabilities")
-        || request.contains(":GetCapabilities")
-        || request.contains(":GetDeviceInformation")
-        || request.contains(":GetServices")
-        || request.contains(":GetSystemDateAndTime")
-        || request.contains(":GetServiceCapabilities")
+    let public_endpoints = [
+        "GetCapabilities",
+        "GetDeviceInformation",
+        "GetServices",
+        "GetSystemDateAndTime",
+        "GetServiceCapabilities",
+    ];
+
+    for endpoint in &public_endpoints {
+        // Check various patterns where the endpoint might appear
+        if request.contains(endpoint)
+            || request.contains(&format!("<{}>", endpoint))
+            || request.contains(&format!("<{}/>", endpoint))
+            || request.contains(&format!(":{}", endpoint))
+            || request.contains(&format!("<{} ", endpoint))
+            || request.contains(&format!("tds:{}", endpoint))
+            || request.contains(&format!("trt:{}", endpoint))
+            || request.contains(&format!("soap:{}", endpoint))
+        {
+            println!("  Detected public endpoint: {}", endpoint);
+            return true;
+        }
+    }
+
+    println!("  Request does not match any public endpoint patterns");
+    false
 }
 
 fn extract_authorization_header(request: &str) -> Option<String> {
@@ -413,41 +445,204 @@ fn validate_basic_auth(auth_header: &str, username: &str, password: &str) -> boo
     false
 }
 
+fn validate_digest_auth(auth_header: &str, request: &str, username: &str, password: &str) -> bool {
+    // Parse Digest authentication header
+    // Format: Digest username="user", realm="realm", nonce="nonce", uri="/path", response="hash"
+    let mut auth_params = std::collections::HashMap::new();
+
+    // Remove "Digest " prefix and split by comma
+    if let Some(digest_part) = auth_header.strip_prefix("Digest ") {
+        for param in digest_part.split(',') {
+            let param = param.trim();
+            if let Some(eq_pos) = param.find('=') {
+                let key = param[..eq_pos].trim();
+                let value = param[eq_pos + 1..].trim().trim_matches('"');
+                auth_params.insert(key, value);
+            }
+        }
+    }
+
+    // Extract required parameters
+    let auth_username = auth_params.get("username").unwrap_or(&"");
+    let realm = auth_params.get("realm").unwrap_or(&"");
+    let nonce = auth_params.get("nonce").unwrap_or(&"");
+    let uri = auth_params.get("uri").unwrap_or(&"");
+    let response = auth_params.get("response").unwrap_or(&"");
+
+    let method = request
+        .lines()
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .next()
+        .unwrap_or("GET");
+
+    println!("Digest Auth validation:");
+    println!("  Username: {auth_username}");
+    println!("  Realm: {realm}");
+    println!("  Method: {method}");
+    println!("  URI: {uri}");
+
+    // Check username
+    if auth_username != &username {
+        println!("Digest Auth: Username mismatch");
+        return false;
+    }
+
+    // Calculate expected response: MD5(HA1:nonce:HA2)
+    // where HA1 = MD5(username:realm:password)
+    // and HA2 = MD5(method:uri)
+
+    let ha1 = format!("{username}:{realm}:{password}");
+    let ha1_hash = format!("{:x}", md5::compute(ha1.as_bytes()));
+
+    let ha2 = format!("{method}:{uri}");
+    let ha2_hash = format!("{:x}", md5::compute(ha2.as_bytes()));
+
+    let expected_response_str = format!("{ha1_hash}:{nonce}:{ha2_hash}");
+    let expected_response = format!("{:x}", md5::compute(expected_response_str.as_bytes()));
+
+    println!("  Expected response: {expected_response}");
+    println!("  Provided response: {response}");
+
+    if response == &expected_response {
+        println!("Digest Auth: Authentication successful");
+        true
+    } else {
+        println!("Digest Auth: Authentication failed");
+        false
+    }
+}
+
 fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> bool {
+    println!("  WS-Security validation starting...");
+
     // Parse WS-Security UsernameToken
     if let (Some(user_start), Some(user_end)) =
         (request.find("<Username>"), request.find("</Username>"))
     {
         let provided_username = &request[user_start + 10..user_end];
         if provided_username != username {
+            println!(
+                "  WS-Security: Username mismatch. Expected: {}, Got: {}",
+                username, provided_username
+            );
             return false;
         }
     } else {
+        println!("  WS-Security: No username found in request");
         return false;
     }
 
-    // Look for password element
+    // Look for different password element patterns
     if let Some(password_start) = request.find("<Password") {
+        // Find the end of the opening tag
         if let Some(tag_end) = request[password_start..].find('>') {
             let tag_content = &request[password_start..password_start + tag_end + 1];
 
+            // Find the password value
             if let Some(pwd_end) = request[password_start + tag_end + 1..].find("</Password>") {
                 let password_value =
                     &request[password_start + tag_end + 1..password_start + tag_end + 1 + pwd_end];
 
+                // Check what type of password authentication is being used
                 if tag_content.contains("PasswordDigest") {
-                    // For PasswordDigest, we'd need to extract nonce and created timestamp
-                    // For simplicity, we'll just check if it's plain text password
-                    return password_value == password;
+                    println!("  WS-Security: Found PasswordDigest type");
+
+                    // Extract nonce - look for various nonce patterns
+                    let nonce = extract_ws_security_element(request, "Nonce");
+
+                    // Extract created timestamp - look for various created patterns
+                    let created = extract_ws_security_element(request, "Created");
+
+                    // If either is None, we can't validate
+                    if nonce.is_none() || created.is_none() {
+                        println!("  WS-Security: Missing nonce or created timestamp");
+                        return false;
+                    }
+
+                    let nonce = nonce.unwrap();
+                    let created = created.unwrap();
+
+                    // Decode the nonce from base64
+                    let nonce_bytes = match general_purpose::STANDARD.decode(nonce) {
+                        Ok(bytes) => bytes,
+                        Err(_) => {
+                            println!("  WS-Security: Failed to decode nonce");
+                            return false;
+                        }
+                    };
+
+                    // Calculate expected password digest
+                    // PasswordDigest = Base64(SHA1(Nonce + Created + Password))
+                    let mut hasher = sha1::Sha1::new();
+                    hasher.update(&nonce_bytes);
+                    hasher.update(created.as_bytes());
+                    hasher.update(password.as_bytes());
+                    let digest = hasher.finalize();
+                    let expected_digest = general_purpose::STANDARD.encode(digest);
+
+                    println!("  Expected digest: {}", expected_digest);
+                    println!("  Provided digest: {}", password_value);
+
+                    if password_value == expected_digest {
+                        println!("  WS-Security: Authentication successful");
+                        return true;
+                    } else {
+                        println!("  WS-Security: Authentication failed - digest mismatch");
+                        return false;
+                    }
                 } else {
-                    // Plain text password
-                    return password_value == password;
+                    println!("  WS-Security: Using plain text password");
+                    if password_value == password {
+                        println!("  WS-Security: Authentication successful");
+                        return true;
+                    } else {
+                        println!("  WS-Security: Authentication failed - password mismatch");
+                        return false;
+                    }
                 }
+            } else {
+                println!("  WS-Security: Malformed Password element - no closing tag");
+                return false;
+            }
+        } else {
+            println!("  WS-Security: Malformed Password element - no closing >");
+            return false;
+        }
+    } else {
+        println!("  WS-Security: No Password element found");
+        return false;
+    }
+}
+
+fn extract_ws_security_element(request: &str, element_name: &str) -> Option<String> {
+    // Look for opening tag with various prefixes and potential attributes
+    for prefix in ["", "wsu:", "wsse:", "s:", "soap:"] {
+        let tag_start = format!("<{}{}", prefix, element_name);
+
+        if let Some(open_pos) = request.find(&tag_start) {
+            // Find the end of the opening tag (either > or space)
+            let content_start = if let Some(gt_pos) = request[open_pos..].find('>') {
+                open_pos + gt_pos + 1
+            } else {
+                continue;
+            };
+
+            // Look for the closing tag
+            let close_tag = format!("</{}{}>", prefix, element_name);
+            if let Some(close_pos) = request[content_start..].find(&close_tag) {
+                let content_end = content_start + close_pos;
+                let content = request[content_start..content_end].trim();
+
+                println!("  Found {}: '{}'", element_name, content);
+                return Some(content.to_string());
             }
         }
     }
 
-    false
+    println!("  Could not find element: {}", element_name);
+    None
 }
 
 fn send_auth_required_response(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
