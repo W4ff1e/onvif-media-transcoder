@@ -23,25 +23,29 @@ WORKDIR /app
 # Copy dependency files first (for Docker layer caching)
 COPY Cargo.toml Cargo.lock ./
 
-# Create a dummy main.rs and lib.rs to build dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs && echo "// lib" > src/lib.rs
+# Create a dummy source structure to build dependencies
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs
 
-# Build dependencies with cache mount (this will cache Rust dependencies)
-RUN --mount=type=cache,target=/app/target \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
+# Pre-compile dependencies with cache mount for faster subsequent builds
+RUN --mount=type=cache,target=/app/target,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     case ${TARGETARCH} in \
     "amd64") cargo build --release --target x86_64-unknown-linux-musl ;; \
     "arm64") cargo build --release --target aarch64-unknown-linux-musl ;; \
-    esac && rm -rf src
+    esac
+
+# Remove dummy source
+RUN rm -rf src
 
 # Copy the actual source code
 COPY src ./src
 
 # Build the actual application with cache mount
-RUN --mount=type=cache,target=/app/target \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
+RUN --mount=type=cache,target=/app/target,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     case ${TARGETARCH} in \
     "amd64") cargo build --release --target x86_64-unknown-linux-musl && \
     cp target/x86_64-unknown-linux-musl/release/onvif-media-transcoder /tmp/onvif-media-transcoder ;; \
