@@ -8,8 +8,8 @@ Currently supported versions with security updates:
 | -------- | ------------------ | ------------------------------------ |
 | latest   | :white_check_mark: | Latest stable Docker image           |
 | unstable | :warning:          | Development builds - use at own risk |
-| v1.x.x   | :white_check_mark: | Tagged releases (when available)     |
-| < v1.0   | :x:                | Pre-release versions not supported   |
+| v0.x.x   | :white_check_mark: | Tagged releases (when available)     |
+| < v0.1   | :x:                | Pre-release versions not supported   |
 
 ## Security Considerations
 

@@ -121,7 +121,7 @@ docker run --rm -p 8080:8080 -p 8554:8554 -p 3702:3702/udp \
   w4ff1e/onvif-media-transcoder:latest
 
 # Run specific version
-docker run --rm --network host w4ff1e/onvif-media-transcoder:v1.0.0
+docker run --rm --network host w4ff1e/onvif-media-transcoder:v0.1.0
 
 # Run unstable/development version (latest commit to main)
 docker run --rm --network host w4ff1e/onvif-media-transcoder:unstable
@@ -133,7 +133,7 @@ The project publishes Docker images to Docker Hub with the following tags:
 
 - **`latest`** - Latest stable release
 - **`unstable`** - Latest commit to main branch
-- **`v0.10.0`** - Specific version releases
+- **`v0.1.0`** - Specific version releases
 
 ### Docker Compose
 
@@ -157,15 +157,17 @@ docker-compose -f examples/docker-compose.yml down
 
 ### Environment Variables
 
-| Variable           | Default                  | Description                   |
-| ------------------ | ------------------------ | ----------------------------- |
-| `INPUT_URL`        | Demo HLS stream          | Source video stream URL       |
-| `RTSP_OUTPUT_PORT` | `8554`                   | RTSP server port              |
-| `ONVIF_PORT`       | `8080`                   | ONVIF web service port        |
-| `DEVICE_NAME`      | `ONVIF-Media-Transcoder` | Camera device name            |
-| `RTSP_PATH`        | `/stream`                | RTSP stream path              |
-| `ONVIF_USERNAME`   | `admin`                  | ONVIF authentication username |
-| `ONVIF_PASSWORD`   | `onvif-rust`             | ONVIF authentication password |
+| Variable               | Default                  | Description                   |
+| ---------------------- | ------------------------ | ----------------------------- |
+| `INPUT_URL`            | Demo HLS stream          | Source video stream URL       |
+| `RTSP_OUTPUT_PORT`     | `8554`                   | RTSP server port              |
+| `RTSP_PATH`            | `/stream`                | RTSP stream path              |
+| `ONVIF_PORT`           | `8080`                   | ONVIF web service port        |
+| `DEVICE_NAME`          | `ONVIF-Media-Transcoder` | Camera device name            |
+| `ONVIF_USERNAME`       | `admin`                  | ONVIF authentication username |
+| `ONVIF_PASSWORD`       | `onvif-rust`             | ONVIF authentication password |
+| `WS_DISCOVERY_ENABLED` | `true`                   | Enable WS-Discovery service   |
+| `DEBUGLOGGING`         | `false`                  | Enable debug logging          |
 
 **Note**: The service automatically detects the container IP and configures all services accordingly.
 
@@ -344,7 +346,7 @@ cargo build --release
 The project includes sample configuration files in the `examples/` directory:
 
 - `examples/docker-compose.yml` - Local development Docker Compose setup
-- `examples/docker-compose.hub.yml` - Published image Docker Compose setup  
+- `examples/docker-compose.yml` - Production-ready setup using published Docker Hub images  
 - `examples/.env.example` - Sample environment variables
 
 ```bash
@@ -372,7 +374,7 @@ For local development without Docker, see [**Local Development Guide**](docs/LOC
 The project uses GitHub Actions to build and publish Docker images:
 
 - **Every commit to `main`**: Publishes `unstable` tag
-- **Tagged releases**: Publishes versioned tags (e.g., `v1.0.0`) and updates `latest`
+- **Tagged releases**: Publishes versioned tags (e.g., `v0.20.0`) and updates `latest`
 - **Multi-architecture**: Builds for both `linux/amd64` and `linux/arm64`
 - **Security scanning**: Vulnerability scanning with CodeQL and Trivy
 - **Documentation sync**: Updates Docker Hub description from README
@@ -391,8 +393,8 @@ git push origin feature/my-feature
 # For maintainers creating releases
 # Use GitHub Actions "Create Release" workflow
 # Or manually tag and push:
-git tag v1.0.0
-git push origin v1.0.0
+git tag v0.21.0
+git push origin v0.21.0
 ```
 
 Project structure:
@@ -403,8 +405,8 @@ Project structure:
 │   ├── onvif_responses.rs   # SOAP response templates
 │   └── ws_discovery.rs      # WS-Discovery implementation
 ├── examples/                # Example configurations
-│   ├── docker-compose.yml   # Local development setup
-│   ├── docker-compose.hub.yml # Published image setup
+│   ├── docker-compose.yml   # Production setup with published images
+│   ├── docker-compose.local.yml # Local development setup
 │   └── .env.example         # Sample environment variables
 ├── scripts/                 # Utility scripts
 │   ├── build.sh             # Docker build script

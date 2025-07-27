@@ -5,8 +5,8 @@
 # The graph table configures how the dependency graph is constructed and thus
 # which crates the checks are performed over
 targets = [
-    { triple = "x86_64-unknown-linux-gnu" },
-    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-unknown-linux-musl" },
+    { triple = "aarch64-unknown-linux-musl" },
 ]
 all-features = false
 no-default-features = false

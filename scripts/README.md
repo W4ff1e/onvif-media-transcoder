@@ -6,9 +6,7 @@ This directory contains utility scripts for building, testing, and publishing th
 
 - **`build.sh`** - Comprehensive Docker build script with multi-architecture support
 - **`publish.sh`** - Docker image publishing script for Docker Hub
-- **`quick-start.sh`** - Quick setup and testing script
-- **`env-setup.sh`** - Environment variable management for local development
-- **`run-local.sh`** - Direct run script with environment variables pre-configured
+- **`quick-start.sh`** - Quick setup and testing script with multiple commands
 
 ## Usage
 
@@ -18,50 +16,92 @@ Make scripts executable before running:
 chmod +x scripts/*.sh
 ```
 
-### Build Script
+### Build Script (`build.sh`)
+
+Builds Docker images with support for multiple architectures:
 
 ```bash
 ./scripts/build.sh [options]
 ```
 
-### Publish Script
+**Features:**
+
+- Multi-architecture support (amd64, arm64)
+- Caching optimization
+- Security scanning integration
+- Build argument customization
+
+### Publish Script (`publish.sh`)
+
+Publishes Docker images to Docker Hub:
 
 ```bash
 ./scripts/publish.sh [options]
 ```
 
-### Quick Start
+**Features:**
+
+- Automated tagging (latest, version-specific, unstable)
+- Multi-platform image publishing
+- Registry authentication handling
+- Release workflow integration
+
+### Quick Start Script (`quick-start.sh`)
+
+Provides quick commands for common development and testing operations:
 
 ```bash
-./scripts/quick-start.sh
+./scripts/quick-start.sh [command]
 ```
 
-### Environment Setup
+**Available Commands:**
 
-For local development, use the environment setup script:
+- `setup` - Create .env file from template
+- `build` - Build the Docker image locally
+- `run` - Run with default configuration
+- `compose` - Start using Docker Compose
+- `test` - Run integration tests
+- `stop` - Stop running containers
+- `clean` - Clean up containers and images
+- `logs` - Show container logs
+- `help` - Show detailed help
+
+**Examples:**
 
 ```bash
-# Set environment variables in current shell
-source ./scripts/env-setup.sh set
+# Quick setup and run
+./scripts/quick-start.sh setup
+./scripts/quick-start.sh run
 
-# Check status
-source ./scripts/env-setup.sh status
+# Development workflow
+./scripts/quick-start.sh build
+./scripts/quick-start.sh compose
 
-# Run cargo
-cargo run
-
-# Cleanup when done
-source ./scripts/env-setup.sh cleanup
+# Testing and debugging
+./scripts/quick-start.sh test
+./scripts/quick-start.sh logs
 ```
 
-### Direct Local Run
+## Prerequisites
 
-For the simplest local testing experience:
+- Docker and Docker Compose
+- Bash shell environment
+- Network access for pulling dependencies
+- For publishing: Docker Hub credentials configured
 
-```bash
-./scripts/run-local.sh
-```
+## Environment Variables
 
-This script automatically sets the required environment variables and runs `cargo run`.
+Scripts respect the following environment variables:
 
-For detailed usage information, run each script with the `--help` flag.
+- `DOCKER_REGISTRY` - Docker registry URL (default: docker.io)
+- `IMAGE_NAME` - Image name (default: w4ff1e/onvif-media-transcoder)
+- `BUILD_ARGS` - Additional Docker build arguments
+- `COMPOSE_FILE` - Docker Compose file to use
+
+## CI/CD Integration
+
+These scripts are designed to work in both local development and CI/CD environments:
+
+- **GitHub Actions** - Automated builds and publishing
+- **Local Development** - Manual testing and debugging
+- **Production Deployment** - Streamlined container management

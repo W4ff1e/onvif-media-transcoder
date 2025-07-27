@@ -2,54 +2,33 @@
 
 ## Project Overview
 
-ONVIF-compatible media transcoder (Rust) converting input streams to RTSP with full ONVIF device emulation.
-Integrates FFmpeg, MediaMTX, and custom ONVIF service with WS-Discovery.
+ONVIF-compatible media transcoder (Rust) that re-muxes input streams via MediaMTX and provides ONVIF device emulation with WS-Discovery.
 
-## Critical Review Points
+**Key Components:** Rust ONVIF service, WS-Discovery, MediaMTX integration, Docker containerization
 
-### Rust Code Quality
+## Critical Requirements
 
-- **MUST pass**: `cargo clippy --all-targets --all-features -- -D warnings` (zero warnings)
-- **Memory safety**: Review `unsafe` blocks, prefer `Result<T,E>`, avoid `.unwrap()`
-- **ONVIF specific**: Validate SOAP XML structure, authentication (Basic/Digest/WS-Security), WS-Discovery compliance
+### Code Quality
+- **MUST pass**: `cargo clippy --all-targets --all-features -- -D warnings`
+- **Memory safety**: Prefer `Result<T,E>`, avoid `.unwrap()` except in tests
+- **ONVIF compliance**: Validate SOAP XML, authentication (Basic/Digest/WS-Security), WS-Discovery
 
-```rust
-// ❌ Avoid
-let response = format!("<?xml version=\"1.0\"?><soap:Envelope>{}</soap:Envelope>", body);
-let config = std::env::var("ONVIF_PORT").unwrap();
-
-// ✅ Prefer  
-let response = format!("<?xml version=\"1.0\"?><soap:Envelope>{body}</soap:Envelope>");
-let config = std::env::var("ONVIF_PORT")?;
-```
-
-### Security & Infrastructure
-
-- **Docker**: Non-root user, no hardcoded secrets, multi-stage builds
+### Security
+- **Docker**: Non-root user, no hardcoded secrets
+- **Authentication**: No credential logging, validate inputs, prevent XML injection
 - **Ports**: 8080 (ONVIF), 8554 (RTSP), 3702 (WS-Discovery)
-- **Authentication**: No plaintext logging, validate inputs, prevent XML injection
-- **FFmpeg**: Prevent command injection, validate stream URLs
-
-### ONVIF Compliance
-
-- SOAP responses match ONVIF specs
-- GetCapabilities/GetProfiles/GetStreamUri compliance
-- WS-Security timestamp validation
-- Device discovery metadata requirements
 
 ## Pre-Merge Checklist
-
 - [ ] Clippy clean (`-D warnings`)
 - [ ] `cargo fmt --check` passes
-- [ ] Security scan clean
-- [ ] Docker multi-arch builds
-- [ ] ONVIF endpoint tests pass
-- [ ] No performance regression
+- [ ] All tests pass
+- [ ] Docker builds successfully
+- [ ] ONVIF endpoints tested with real clients
 
-## Patterns
+## Code Patterns
 
 ```rust
-// Error types
+// Error handling
 #[derive(Debug, thiserror::Error)]
 enum OnvifError {
     #[error("Authentication failed: {0}")]
@@ -59,13 +38,16 @@ enum OnvifError {
 // Logging
 tracing::info!(port = %onvif_port, "ONVIF service starting");
 
-// Constants
-const DEFAULT_RTSP_PORT: u16 = 8554;
+// Configuration (CLI args for local dev, env vars handled by entrypoint.sh)
+#[derive(Debug, Clone, Parser)]
+struct Config {
+    #[arg(short = 'r', long)]
+    rtsp_stream_url: String,
+}
 ```
 
-## AI Code Notes
+## AI Code Review Notes
 
-- Extra security review for auth/network code
-- Verify ONVIF protocol compliance manually
-- Test all network-facing functionality
-- Reference: [ONVIF Core Spec](https://www.onvif.org/specs/core/ONVIF-Core-Specification.pdf)
+- **Extra security review** for authentication and network-facing code
+- **Verify ONVIF compliance** against [official specs](https://www.onvif.org/specs/)
+- **Check dependencies** for vulnerabilities regularly
