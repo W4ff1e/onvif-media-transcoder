@@ -27,9 +27,9 @@ While thoroughly reviewed and tested, users should:
 
 This application exposes several network services:
 
-- **ONVIF Service** (Port 8080) - HTTP/SOAP endpoints with authentication
-- **RTSP Server** (Port 8554) - Media streaming service
-- **WS-Discovery** (UDP 3702) - Multicast device discovery protocol
+- **ONVIF Service** (Port 8080 By Default) - HTTP/SOAP endpoints with authentication
+- **RTSP Server** (Port 8554 By Default) - Media streaming service
+- **WS-Discovery** (UDP 3702) - Multicast device discovery protocol (if enabled)
 
 ### Authentication Security
 
@@ -44,21 +44,12 @@ The project implements multiple authentication methods:
 - Change default credentials (`admin`/`onvif-rust`) in production
 - Use strong passwords for ONVIF authentication
 - Consider network-level security (VPNs, firewalls) for sensitive deployments
-- Enable HTTPS where possible (currently HTTP only)
 
 ### Container Security
 
-- Docker images are built with multi-stage builds to minimize attack surface
 - Automatic vulnerability scanning with Trivy in CI/CD pipeline
 - Regular dependency updates through automated workflows
 - Non-root user execution where possible
-
-### Known Security Limitations
-
-1. **HTTP Only**: Currently serves HTTP traffic only (no HTTPS/TLS support)
-2. **Default Credentials**: Ships with default username/password that must be changed
-3. **Network Exposure**: Multiple network services exposed by default
-4. **AI-Generated Components**: Some code components generated with AI assistance
 
 ## Reporting a Vulnerability
 
@@ -71,15 +62,10 @@ Use the [GitHub Security Advisory](https://github.com/W4ff1e/onvif-media-transco
 1. Go to the Security tab in the GitHub repository
 2. Click "Report a vulnerability"
 3. Fill out the security advisory form
-
-### Alternative Method
-
-Send an email to [@W4ff1e](mailto:security@throud.org) with:
-
-- Clear description of the vulnerability
-- Steps to reproduce the issue
-- Potential impact assessment
-- Suggested remediation (if any)
+4. Provide detailed information about the vulnerability, including:
+   - Steps to reproduce
+   - Impact assessment
+   - Suggested mitigations or fixes
 
 ### Response Timeline
 
@@ -107,12 +93,6 @@ Send an email to [@W4ff1e](mailto:security@throud.org) with:
 3. **Container Security**
 
    ```bash
-   # Run with read-only filesystem where possible
-   docker run --read-only --tmpfs /tmp --tmpfs /var/run w4ff1e/onvif-media-transcoder:latest
-   
-   # Use specific user (if supported)
-   docker run --user 1000:1000 w4ff1e/onvif-media-transcoder:latest
-   
    # Limit container capabilities
    docker run --cap-drop=ALL --cap-add=NET_BIND_SERVICE w4ff1e/onvif-media-transcoder:latest
    ```
@@ -120,7 +100,6 @@ Send an email to [@W4ff1e](mailto:security@throud.org) with:
 4. **Monitoring and Logging**
    - Enable container logging and monitoring
    - Watch for authentication failures and unusual access patterns
-   - Set up alerts for security-relevant events
 
 ### Development Security
 
@@ -137,24 +116,6 @@ Send an email to [@W4ff1e](mailto:security@throud.org) with:
    - Include security testing in CI/CD pipeline
    - Test authentication mechanisms with various clients
    - Validate input sanitization and error handling
-
-## Security Disclosure Policy
-
-### Coordinated Disclosure
-
-We follow responsible disclosure practices:
-
-1. **Private Reporting**: Security issues should be reported privately first
-2. **Assessment Period**: Time for evaluation and fix development
-3. **Coordinated Release**: Public disclosure after fixes are available
-4. **Credit**: Security researchers will be credited (unless they prefer anonymity)
-
-### Severity Classification
-
-- **Critical**: Remote code execution, authentication bypass, data exposure
-- **High**: Privilege escalation, significant data access
-- **Medium**: Information disclosure, denial of service
-- **Low**: Minor security improvements, configuration issues
 
 ## Security Resources
 
@@ -176,4 +137,4 @@ We appreciate community feedback to enhance the security posture of this project
 ---
 
 **Last Updated**: July 2025  
-**Policy Version**: 1.0
+**Policy Version**: 2.0
