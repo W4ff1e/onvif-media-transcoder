@@ -59,10 +59,15 @@ impl WSDiscoveryServer {
         device_info: DeviceInfo,
         interface_addr: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Bind to the multicast address
-        let bind_addr = format!("{interface_addr}:3702");
-        let socket = UdpSocket::bind(&bind_addr)
+        // Bind to 0.0.0.0:3702 to listen on all interfaces for multicast
+        let bind_addr = "0.0.0.0:3702";
+        let socket = UdpSocket::bind(bind_addr)
             .map_err(|e| format!("Failed to bind to {bind_addr}: {e}"))?;
+
+        // Set socket options for better multicast handling
+        socket
+            .set_broadcast(true)
+            .map_err(|e| format!("Failed to set broadcast: {e}"))?;
 
         // Join the multicast group
         let multicast_addr: Ipv4Addr = "239.255.255.250"
@@ -77,7 +82,9 @@ impl WSDiscoveryServer {
             .map_err(|e| format!("Failed to join multicast group: {e}"))?;
 
         println!("WS-Discovery server bound to {bind_addr}");
-        println!("Joined multicast group {WS_DISCOVERY_MULTICAST_ADDR}");
+        println!(
+            "Joined multicast group {WS_DISCOVERY_MULTICAST_ADDR} on interface {interface_addr}"
+        );
 
         Ok(WSDiscoveryServer {
             device_info,
@@ -98,19 +105,48 @@ impl WSDiscoveryServer {
 
         println!("WS-Discovery server started, listening for probe requests...");
 
+        // Set a reasonable receive timeout to avoid blocking indefinitely
+        let timeout = std::time::Duration::from_secs(1);
+        self.socket.set_read_timeout(Some(timeout))?;
+
         let mut buffer = [0; 4096];
+        let mut message_count = 0u32;
+        let mut last_hello = std::time::Instant::now();
+        let hello_interval = std::time::Duration::from_secs(60); // Send Hello every 60 seconds
 
         loop {
             match self.socket.recv_from(&mut buffer) {
                 Ok((size, src)) => {
+                    message_count += 1;
                     let message = String::from_utf8_lossy(&buffer[..size]);
                     if let Err(e) = self.handle_message(&message, src) {
-                        eprintln!("Error handling WS-Discovery message from {src}: {e}");
+                        eprintln!(
+                            "Error handling WS-Discovery message #{message_count} from {src}: {e}"
+                        );
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error receiving WS-Discovery message: {e}");
-                    break;
+                    // Handle timeout as normal (not an error)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut
+                    {
+                        // Check if we should send a periodic Hello message
+                        if last_hello.elapsed() >= hello_interval {
+                            if let Err(e) = self.send_hello() {
+                                eprintln!("Failed to send periodic Hello message: {e}");
+                            }
+                            last_hello = std::time::Instant::now();
+                        }
+
+                        // Periodic status update every ~10 seconds
+                        if message_count % 10 == 0 && message_count > 0 {
+                            println!("WS-Discovery: Processed {message_count} messages, still listening...");
+                        }
+                        continue;
+                    } else {
+                        eprintln!("Error receiving WS-Discovery message: {e}");
+                        break;
+                    }
                 }
             }
         }
@@ -137,10 +173,24 @@ impl WSDiscoveryServer {
             println!("Received WS-Discovery message from {src}: {first_line}");
         }
 
-        // Check if this is a Probe request
-        if message.contains("Probe") && message.contains(WS_DISCOVERY_NAMESPACE) {
+        // Enhanced probe detection - check for various probe patterns
+        let is_probe_request = message.contains("Probe")
+            && (message.contains(WS_DISCOVERY_NAMESPACE) || message.contains("discovery"))
+            && (message.contains("ProbeType")
+                || message.contains("Types")
+                || !message.contains("ProbeMatch"));
+
+        // Also check for specific ONVIF probe patterns
+        let is_onvif_probe = message.contains("NetworkVideoTransmitter")
+            || message.contains("tdn:")
+            || message.contains("onvif://www.onvif.org");
+
+        if is_probe_request || is_onvif_probe {
+            println!("Detected Probe request from {src}, sending ProbeMatch response");
             let message_id = self.extract_message_id(message);
             self.send_probe_match(src, &message_id)?;
+        } else {
+            println!("Received non-probe message from {src} (ignoring)");
         }
 
         Ok(())
@@ -154,25 +204,34 @@ impl WSDiscoveryServer {
     /// # Returns
     /// * `String` - The extracted MessageID or a new UUID if not found
     fn extract_message_id(&self, message: &str) -> String {
-        // Simple XML parsing to extract MessageID
-        if let Some(start) = message.find("<a:MessageID>") {
-            if let Some(end) = message[start..].find("</a:MessageID>") {
-                let id_start = start + "<a:MessageID>".len();
-                let id_end = start + end;
-                return message[id_start..id_end].to_string();
-            }
-        }
+        // List of possible MessageID patterns to try
+        let patterns = [
+            ("<a:MessageID>", "</a:MessageID>"),
+            ("<wsa:MessageID>", "</wsa:MessageID>"),
+            ("<MessageID>", "</MessageID>"),
+            ("<soap:MessageID>", "</soap:MessageID>"),
+            ("<s:MessageID>", "</s:MessageID>"),
+        ];
 
-        // Try alternative namespace prefix
-        if let Some(start) = message.find("<wsa:MessageID>") {
-            if let Some(end) = message[start..].find("</wsa:MessageID>") {
-                let id_start = start + "<wsa:MessageID>".len();
-                let id_end = start + end;
-                return message[id_start..id_end].to_string();
+        for (start_tag, end_tag) in patterns.iter() {
+            if let Some(start) = message.find(start_tag) {
+                if let Some(end) = message[start..].find(end_tag) {
+                    let id_start = start + start_tag.len();
+                    let id_end = start + end;
+                    let message_id = message[id_start..id_end].trim();
+
+                    // Clean up the message ID - remove urn:uuid: prefix if present
+                    if message_id.starts_with("urn:uuid:") {
+                        return message_id[9..].to_string();
+                    } else if !message_id.is_empty() {
+                        return message_id.to_string();
+                    }
+                }
             }
         }
 
         // Fallback to generating a new UUID
+        println!("Could not extract MessageID from probe request, generating new one");
         self.generate_uuid()
     }
 
@@ -188,11 +247,18 @@ impl WSDiscoveryServer {
             .parse()
             .map_err(|e| format!("Invalid multicast address: {e}"))?;
 
+        println!("Sending Hello message to {multicast_addr}");
+        println!("Hello message details:");
+        println!("  - Device Name: {}", self.device_info.friendly_name);
+        println!("  - Types: {}", self.device_info.types);
+        println!("  - XAddrs: {}", self.device_info.xaddrs);
+        println!("  - Scopes: {}", self.device_info.scopes);
+
         self.socket
             .send_to(hello_message.as_bytes(), multicast_addr)
             .map_err(|e| format!("Failed to send Hello message: {e}"))?;
 
-        println!("Sent Hello message");
+        println!("Hello message sent successfully (MessageID: {message_id})");
         Ok(())
     }
 
@@ -234,11 +300,16 @@ impl WSDiscoveryServer {
         let message_id = self.generate_uuid();
         let probe_match = self.create_probe_match_message(&message_id, relates_to);
 
+        println!("Sending ProbeMatch response to {dest}");
+        println!("  - RelatesTo: {relates_to}");
+        println!("  - MessageID: {message_id}");
+        println!("  - XAddrs: {}", self.device_info.xaddrs);
+
         self.socket
             .send_to(probe_match.as_bytes(), dest)
             .map_err(|e| format!("Failed to send ProbeMatch to {dest}: {e}"))?;
 
-        println!("Sent ProbeMatch to {dest}");
+        println!("ProbeMatch sent successfully to {dest}");
         Ok(())
     }
 
