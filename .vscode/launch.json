@@ -36,6 +36,95 @@
             ],
             "preLaunchTask": "Docker: Run Container (HLS Test)",
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Rust: Debug Local (Demo Stream)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/onvif-media-transcoder",
+            "args": [
+                "--rtsp-stream-url",
+                "rtsp://127.0.0.1:8554/stream",
+                "--onvif-port",
+                "8080",
+                "--device-name",
+                "Local-ONVIF-Transcoder",
+                "--onvif-username",
+                "admin",
+                "--onvif-password",
+                "onvif-rust"
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Rust: Build",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Rust: Debug with WS-Discovery",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/onvif-media-transcoder",
+            "args": [
+                "--rtsp-stream-url",
+                "rtsp://127.0.0.1:8554/stream",
+                "--onvif-port",
+                "8080",
+                "--device-name",
+                "WS-Discovery-Transcoder",
+                "--onvif-username",
+                "admin",
+                "--onvif-password",
+                "onvif-rust",
+                "--ws-discovery-enabled"
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Rust: Build",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Rust: Debug with Debug Mode",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/onvif-media-transcoder",
+            "args": [
+                "--rtsp-stream-url",
+                "rtsp://127.0.0.1:8554/stream",
+                "--onvif-port",
+                "8080",
+                "--device-name",
+                "Debug-ONVIF-Transcoder",
+                "--onvif-username",
+                "admin",
+                "--onvif-password",
+                "onvif-rust",
+                "--debug"
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Rust: Build",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Rust: Run Tests",
+            "type": "lldb",
+            "request": "launch",
+            "program": "/bin/echo",
+            "args": [
+                "Tests completed"
+            ],
+            "preLaunchTask": "Rust: Test",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Rust: Check Code",
+            "type": "lldb",
+            "request": "launch",
+            "program": "/bin/echo",
+            "args": [
+                "Code check completed"
+            ],
+            "preLaunchTask": "Rust: Check",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
         }
     ]
 }

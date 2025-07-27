@@ -71,11 +71,6 @@ endpoints for integration with ONVIF clients.
   - Direct stream re-muxing without re-encoding
   - RTSP delivery over TCP
   - Minimal latency processing
-- [x] **Container Features**:
-  - Error handling and logging
-  - Service recovery and monitoring
-  - MediaMTX integration
-  - Configurable authentication
 
 ## Quick Start
 
@@ -133,7 +128,7 @@ The project publishes Docker images to Docker Hub with the following tags:
 
 - **`latest`** - Latest stable release
 - **`unstable`** - Latest commit to main branch
-- **`v0.1.0`** - Specific version releases
+- **`v0.2.0`** - Specific version releases
 
 ### Docker Compose
 
@@ -236,7 +231,6 @@ The service consists of three components working together to provide ONVIF-compa
 - **Default Credentials**: `admin` / `onvif-rust`
 - **Security**: Device discovery endpoints allow unauthenticated access for ONVIF compliance
 - **Customization**: Configure via `ONVIF_USERNAME` and `ONVIF_PASSWORD` environment variables
-- **Standards Compliance**: Full WS-Security Username Token Profile implementation
 
 ### Discovery
 
@@ -323,6 +317,7 @@ If experiencing stream lag or quality issues:
 - [Docker](https://www.docker.com/get-started) for containerization
 - [Rust](https://www.rust-lang.org/tools/install) 1.70 or later (for local development)
 - [VS Code](https://code.visualstudio.com/) with Rust extensions
+- [Git](https://git-scm.com/) for version control
 
 ### Building
 
@@ -377,7 +372,6 @@ The project uses GitHub Actions to build and publish Docker images:
 - **Tagged releases**: Publishes versioned tags (e.g., `v0.20.0`) and updates `latest`
 - **Multi-architecture**: Builds for both `linux/amd64` and `linux/arm64`
 - **Security scanning**: Vulnerability scanning with CodeQL and Trivy
-- **Documentation sync**: Updates Docker Hub description from README
 
 > Note: The Multi-architecture builds are currently untested and may not work on anything except x86_64 Linux systems.
 
@@ -389,12 +383,6 @@ git checkout -b feature/my-feature
 # ... make changes ...
 git push origin feature/my-feature
 # Create pull request - triggers CI tests
-
-# For maintainers creating releases
-# Use GitHub Actions "Create Release" workflow
-# Or manually tag and push:
-git tag v0.21.0
-git push origin v0.21.0
 ```
 
 Project structure:
@@ -438,7 +426,7 @@ Please make sure to update tests as appropriate and follow the existing code sty
 
 ## Security
 
-Security is a critical consideration for ONVIF Media Transcoder, especially given its network-exposed
+Security is an important consideration for ONVIF Media Transcoder, especially given its network-exposed
 services and authentication mechanisms.
 
 ### Important Security Notice

@@ -62,18 +62,80 @@
             "type": "shell",
             "command": "cargo",
             "args": [
-                "run"
+                "run",
+                "--",
+                "--rtsp-stream-url",
+                "rtsp://127.0.0.1:8554/stream",
+                "--onvif-port",
+                "8080",
+                "--device-name",
+                "Local-ONVIF-Transcoder",
+                "--onvif-username",
+                "admin",
+                "--onvif-password",
+                "onvif-rust"
             ],
             "group": "test",
-            "options": {
-                "env": {
-                    "RTSP_INPUT": "rtsp://127.0.0.1:8554/stream",
-                    "ONVIF_PORT": "8080",
-                    "DEVICE_NAME": "Local-ONVIF-Transcoder",
-                    "ONVIF_USERNAME": "admin",
-                    "ONVIF_PASSWORD": "onvif-rust"
-                }
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
             },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "Rust: Run with WS-Discovery",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--",
+                "--rtsp-stream-url",
+                "rtsp://127.0.0.1:8554/stream",
+                "--onvif-port",
+                "8080",
+                "--device-name",
+                "WS-Discovery-Transcoder",
+                "--onvif-username",
+                "admin",
+                "--onvif-password",
+                "onvif-rust",
+                "--ws-discovery-enabled"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "label": "Rust: Run with Debug Mode",
+            "type": "shell",
+            "command": "cargo",
+            "args": [
+                "run",
+                "--",
+                "--rtsp-stream-url",
+                "rtsp://127.0.0.1:8554/stream",
+                "--onvif-port",
+                "8080",
+                "--device-name",
+                "Debug-ONVIF-Transcoder",
+                "--onvif-username",
+                "admin",
+                "--onvif-password",
+                "onvif-rust",
+                "--debug"
+            ],
+            "group": "test",
             "presentation": {
                 "echo": true,
                 "reveal": "always",
