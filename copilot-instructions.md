@@ -2,23 +2,27 @@
 
 ## Project Overview
 
-ONVIF-compatible media transcoder (Rust) that re-muxes input streams via MediaMTX and provides ONVIF device emulation with WS-Discovery.
+ONVIF-compatible media transcoder (Rust) that re-muxes input streams via MediaMTX and provides ONVIF device 
+emulation with WS-Discovery.
 
 **Key Components:** Rust ONVIF service, WS-Discovery, MediaMTX integration, Docker containerization
 
 ## Critical Requirements
 
 ### Code Quality
+
 - **MUST pass**: `cargo clippy --all-targets --all-features -- -D warnings`
 - **Memory safety**: Prefer `Result<T,E>`, avoid `.unwrap()` except in tests
 - **ONVIF compliance**: Validate SOAP XML, authentication (Basic/Digest/WS-Security), WS-Discovery
 
 ### Security
+
 - **Docker**: Non-root user, no hardcoded secrets
 - **Authentication**: No credential logging, validate inputs, prevent XML injection
 - **Ports**: 8080 (ONVIF), 8554 (RTSP), 3702 (WS-Discovery)
 
 ## Pre-Merge Checklist
+
 - [ ] Clippy clean (`-D warnings`)
 - [ ] `cargo fmt --check` passes
 - [ ] All tests pass
