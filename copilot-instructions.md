@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ONVIF-compatible media transcoder (Rust) that re-muxes input streams via MediaMTX and provides ONVIF device 
+ONVIF-compatible media transcoder (Rust) that re-muxes input streams via MediaMTX and provides ONVIF device
 emulation with WS-Discovery.
 
 **Key Components:** Rust ONVIF service, WS-Discovery, MediaMTX integration, Docker containerization
