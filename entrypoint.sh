@@ -325,12 +325,6 @@ echo "Stream will be available at: ${RTSP_OUTPUT_URL}"
 echo "Check logs for details:"
 echo "  - MediaMTX: /tmp/mediamtx.log"
 
-# Start ONVIF web service (Rust application)
-echo "Starting ONVIF device discovery..."
-echo "Container IP: ${CONTAINER_IP}"
-echo "INFO: WS-Discovery implemented in Rust (integrated with ONVIF service)"
-echo "      ONVIF service will be available at: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
-
 # Verify the Rust binary exists
 if [ ! -f "/usr/local/bin/onvif-media-transcoder" ]; then
     echo "ERROR: Rust binary not found at /usr/local/bin/onvif-media-transcoder"
@@ -370,7 +364,6 @@ echo "ONVIF Endpoint: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
 echo "Note: Input stream is served via MediaMTX RTSP server"
 echo "Log files:"
 echo "  - MediaMTX: /tmp/mediamtx.log (capped at 250 lines: first 100 + last 150)"
-echo "  - ONVIF Service: Direct output to stdout/stderr"
 echo "========================================"
 
 # Function to handle shutdown
