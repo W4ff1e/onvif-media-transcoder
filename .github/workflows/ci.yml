@@ -83,12 +83,13 @@ jobs:
           -e ONVIF_USERNAME="admin" \
           -e ONVIF_PASSWORD="test123" \
           -e WS_DISCOVERY_ENABLED="true" \
+          -e DEBUGLOGGING="true" \
           -p 8080:8080 \
           -p 8554:8554 \
           -p 3702:3702/udp \
           onvif-media-transcoder:test
 
-        # Give the container more time to start (Rust compilation can be slow)
+        # Give the container more time to start
         sleep 10
 
         echo "Checking if container is running..."
