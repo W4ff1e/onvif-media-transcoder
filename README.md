@@ -463,5 +463,11 @@ code components requires additional validation and testing before deployment in 
 
 ---
 
+## Stats
+
+![Alt](https://repobeats.axiom.co/api/embed/f19d8fae5d95fd971fe46aa847f9f23b9e278420.svg "Repobeats analytics image")
+
+---
+
 <!--markdownlint-disable-next-line -->
 **Made with :yellow_heart: by [Waffle](https://github.com/W4ff1e) in collaboration with GitHub Copilot**
