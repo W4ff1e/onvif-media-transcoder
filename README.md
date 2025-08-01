@@ -461,8 +461,6 @@ code components requires additional validation and testing before deployment in 
 - [@W4ff1e](https://github.com/W4ff1e) - Initial work and maintenance
 - [GitHub Copilot](https://github.com/features/copilot) - Pair programming and code assistance
 
----
-
 ## Stats
 
 ![Alt](https://repobeats.axiom.co/api/embed/f19d8fae5d95fd971fe46aa847f9f23b9e278420.svg "Repobeats analytics image")
