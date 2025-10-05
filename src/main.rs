@@ -3,6 +3,7 @@ use clap::Parser;
 use sha1::Digest;
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
+use std::thread;
 
 mod onvif_endpoints;
 mod onvif_responses;
@@ -217,32 +218,19 @@ fn start_onvif_service(config: &Config) -> Result<(), Box<dyn std::error::Error>
     println!("ONVIF Camera service running on port {}", config.onvif_port);
     println!("Stream URI: {}", config.rtsp_stream_url);
 
-    let mut connection_count = 0u64;
-
-    for stream_result in listener.incoming() {
-        match stream_result {
+    for stream in listener.incoming() {
+        match stream {
             Ok(stream) => {
-                connection_count += 1;
-                println!(
-                    "Accepted connection #{} from: {:?}",
-                    connection_count,
-                    stream.peer_addr()
-                );
-
-                // Handle request directly in main thread (simplified)
-                if let Err(e) = handle_onvif_request(stream, config) {
-                    eprintln!("Error handling connection #{connection_count}: {e}");
-                }
+                let config_clone = config.clone();
+                thread::spawn(move || {
+                    if let Err(e) = handle_onvif_request(stream, &config_clone) {
+                        eprintln!("Error handling connection: {e}");
+                    }
+                });
             }
             Err(e) => {
                 eprintln!("Error accepting connection: {e}");
-                continue;
             }
-        }
-
-        // Periodic status update
-        if connection_count % 10 == 0 {
-            println!("ONVIF service is healthy - processed {connection_count} connections");
         }
     }
 
