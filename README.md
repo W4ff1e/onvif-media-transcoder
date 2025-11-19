@@ -30,7 +30,6 @@ It includes a built-in WS-Discovery server for device discovery.
   - [Testing](#testing)
   - [Troubleshooting](#troubleshooting)
   - [Development](#development)
-  - [CI/CD and Releases](#cicd-and-releases)
   - [Contributing](#contributing)
   - [Security](#security)
   - [License](#license)
@@ -123,9 +122,11 @@ The service consists of three components:
 ### Supported Endpoints
 
 **Device Service** (`/onvif/device_service`):
+
 - `GetCapabilities`, `GetDeviceInformation`
 
 **Media Service** (`/onvif/media_service`):
+
 - `GetProfiles`, `GetStreamUri`, `GetVideoSources`, `GetServiceCapabilities`
 
 ### Authentication
