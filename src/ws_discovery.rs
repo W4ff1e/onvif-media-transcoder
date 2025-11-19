@@ -44,6 +44,7 @@ pub struct DeviceInfo {
 pub struct WSDiscoveryServer {
     device_info: DeviceInfo,
     socket: UdpSocket,
+    debug: bool,
 }
 
 impl WSDiscoveryServer {
@@ -52,12 +53,14 @@ impl WSDiscoveryServer {
     /// # Arguments
     /// * `device_info` - Device information for announcements
     /// * `interface_addr` - Local interface IP address to bind to
+    /// * `debug` - Enable verbose logging
     ///
     /// # Returns
     /// * `Result<Self, Box<dyn std::error::Error>>` - Server instance or error
     pub fn new(
         device_info: DeviceInfo,
         interface_addr: &str,
+        debug: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // Bind to 0.0.0.0:3702 to listen on all interfaces for multicast
         let bind_addr = "0.0.0.0:3702";
@@ -89,6 +92,7 @@ impl WSDiscoveryServer {
         Ok(WSDiscoveryServer {
             device_info,
             socket,
+            debug,
         })
     }
 
@@ -139,8 +143,10 @@ impl WSDiscoveryServer {
                         }
 
                         // Periodic status update every ~10 seconds
-                        if message_count % 10 == 0 && message_count > 0 {
-                            println!("WS-Discovery: Processed {message_count} messages, still listening...");
+                        if message_count % 10 == 0 && message_count > 0 && self.debug {
+                            println!(
+                                "WS-Discovery: Processed {message_count} messages, still listening..."
+                            );
                         }
                         continue;
                     } else {
@@ -168,71 +174,24 @@ impl WSDiscoveryServer {
         src: SocketAddr,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Log first line of message for debugging (avoid logging full XML for brevity)
-        let first_line = message.lines().next().unwrap_or("").trim();
-        if !first_line.is_empty() {
-            println!("Received WS-Discovery message from {src}: {first_line}");
+        if self.debug {
+            let first_line = message.lines().next().unwrap_or("").trim();
+            if !first_line.is_empty() {
+                println!("Received WS-Discovery message from {src}: {first_line}");
+            }
         }
 
-        // Enhanced probe detection - check for various probe patterns
-        let is_probe_request = message.contains("Probe")
-            && (message.contains(WS_DISCOVERY_NAMESPACE) || message.contains("discovery"))
-            && (message.contains("ProbeType")
-                || message.contains("Types")
-                || !message.contains("ProbeMatch"));
-
-        // Also check for specific ONVIF probe patterns
-        let is_onvif_probe = message.contains("NetworkVideoTransmitter")
-            || message.contains("tdn:")
-            || message.contains("onvif://www.onvif.org");
-
-        if is_probe_request || is_onvif_probe {
-            println!("Detected Probe request from {src}, sending ProbeMatch response");
-            let message_id = self.extract_message_id(message);
+        if is_probe_request(message) {
+            if self.debug {
+                println!("Detected Probe request from {src}, sending ProbeMatch response");
+            }
+            let message_id = extract_message_id(message);
             self.send_probe_match(src, &message_id)?;
-        } else {
+        } else if self.debug {
             println!("Received non-probe message from {src} (ignoring)");
         }
 
         Ok(())
-    }
-
-    /// Extracts the MessageID from a WS-Discovery message
-    ///
-    /// # Arguments
-    /// * `message` - The XML message to parse
-    ///
-    /// # Returns
-    /// * `String` - The extracted MessageID or a new UUID if not found
-    fn extract_message_id(&self, message: &str) -> String {
-        // List of possible MessageID patterns to try
-        let patterns = [
-            ("<a:MessageID>", "</a:MessageID>"),
-            ("<wsa:MessageID>", "</wsa:MessageID>"),
-            ("<MessageID>", "</MessageID>"),
-            ("<soap:MessageID>", "</soap:MessageID>"),
-            ("<s:MessageID>", "</s:MessageID>"),
-        ];
-
-        for (start_tag, end_tag) in patterns.iter() {
-            if let Some(start) = message.find(start_tag) {
-                if let Some(end) = message[start..].find(end_tag) {
-                    let id_start = start + start_tag.len();
-                    let id_end = start + end;
-                    let message_id = message[id_start..id_end].trim();
-
-                    // Clean up the message ID - remove urn:uuid: prefix if present
-                    if message_id.starts_with("urn:uuid:") {
-                        return message_id[9..].to_string();
-                    } else if !message_id.is_empty() {
-                        return message_id.to_string();
-                    }
-                }
-            }
-        }
-
-        // Fallback to generating a new UUID
-        println!("Could not extract MessageID from probe request, generating new one");
-        self.generate_uuid()
     }
 
     /// Sends a Hello announcement message to the multicast group
@@ -240,19 +199,21 @@ impl WSDiscoveryServer {
     /// # Returns
     /// * `Result<(), Box<dyn std::error::Error>>` - Ok if sent successfully, Err on error
     fn send_hello(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let message_id = self.generate_uuid();
-        let hello_message = self.create_hello_message(&message_id);
+        let message_id = generate_uuid();
+        let hello_message = create_hello_message(&self.device_info, &message_id);
 
         let multicast_addr: SocketAddr = WS_DISCOVERY_MULTICAST_ADDR
             .parse()
             .map_err(|e| format!("Invalid multicast address: {e}"))?;
 
         println!("Sending Hello message to {multicast_addr}");
-        println!("Hello message details:");
-        println!("  - Device Name: {}", self.device_info.friendly_name);
-        println!("  - Types: {}", self.device_info.types);
-        println!("  - XAddrs: {}", self.device_info.xaddrs);
-        println!("  - Scopes: {}", self.device_info.scopes);
+        if self.debug {
+            println!("Hello message details:");
+            println!("  - Device Name: {}", self.device_info.friendly_name);
+            println!("  - Types: {}", self.device_info.types);
+            println!("  - XAddrs: {}", self.device_info.xaddrs);
+            println!("  - Scopes: {}", self.device_info.scopes);
+        }
 
         self.socket
             .send_to(hello_message.as_bytes(), multicast_addr)
@@ -269,8 +230,8 @@ impl WSDiscoveryServer {
     /// # Returns
     /// * `Result<(), Box<dyn std::error::Error>>` - Ok if sent successfully, Err on error
     pub fn send_bye(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let message_id = self.generate_uuid();
-        let bye_message = self.create_bye_message(&message_id);
+        let message_id = generate_uuid();
+        let bye_message = create_bye_message(&self.device_info, &message_id);
 
         let multicast_addr: SocketAddr = WS_DISCOVERY_MULTICAST_ADDR
             .parse()
@@ -297,32 +258,89 @@ impl WSDiscoveryServer {
         dest: SocketAddr,
         relates_to: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let message_id = self.generate_uuid();
-        let probe_match = self.create_probe_match_message(&message_id, relates_to);
+        let message_id = generate_uuid();
+        let probe_match = create_probe_match_message(&self.device_info, &message_id, relates_to);
 
-        println!("Sending ProbeMatch response to {dest}");
-        println!("  - RelatesTo: {relates_to}");
-        println!("  - MessageID: {message_id}");
-        println!("  - XAddrs: {}", self.device_info.xaddrs);
+        if self.debug {
+            println!("Sending ProbeMatch response to {dest}");
+            println!("  - RelatesTo: {relates_to}");
+            println!("  - MessageID: {message_id}");
+            println!("  - XAddrs: {}", self.device_info.xaddrs);
+        }
 
         self.socket
             .send_to(probe_match.as_bytes(), dest)
             .map_err(|e| format!("Failed to send ProbeMatch to {dest}: {e}"))?;
 
-        println!("ProbeMatch sent successfully to {dest}");
+        if self.debug {
+            println!("ProbeMatch sent successfully to {dest}");
+        }
         Ok(())
     }
+}
 
-    /// Creates a Hello announcement message
-    ///
-    /// # Arguments
-    /// * `message_id` - Unique message identifier
-    ///
-    /// # Returns
-    /// * `String` - XML formatted Hello message
-    fn create_hello_message(&self, message_id: &str) -> String {
-        format!(
-            r#"<?xml version="1.0" encoding="utf-8"?>
+/// Implement Drop to send a Bye message when the server is dropped
+impl Drop for WSDiscoveryServer {
+    fn drop(&mut self) {
+        if let Err(e) = self.send_bye() {
+            eprintln!("Failed to send Bye message on drop: {e}");
+        }
+    }
+}
+
+// --- Helper functions (pure logic, testable) ---
+
+fn is_probe_request(message: &str) -> bool {
+    // Enhanced probe detection - check for various probe patterns
+    let is_probe_request = message.contains("Probe")
+        && (message.contains(WS_DISCOVERY_NAMESPACE) || message.contains("discovery"))
+        && (message.contains("ProbeType")
+            || message.contains("Types")
+            || !message.contains("ProbeMatch"));
+
+    // Also check for specific ONVIF probe patterns
+    let is_onvif_probe = message.contains("NetworkVideoTransmitter")
+        || message.contains("tdn:")
+        || message.contains("onvif://www.onvif.org");
+
+    is_probe_request || is_onvif_probe
+}
+
+fn extract_message_id(message: &str) -> String {
+    // List of possible MessageID patterns to try
+    let patterns = [
+        ("<a:MessageID>", "</a:MessageID>"),
+        ("<wsa:MessageID>", "</wsa:MessageID>"),
+        ("<MessageID>", "</MessageID>"),
+        ("<soap:MessageID>", "</soap:MessageID>"),
+        ("<s:MessageID>", "</s:MessageID>"),
+    ];
+
+    for (start_tag, end_tag) in patterns.iter() {
+        if let Some(start) = message.find(start_tag) {
+            if let Some(end) = message[start..].find(end_tag) {
+                let id_start = start + start_tag.len();
+                let id_end = start + end;
+                let message_id = message[id_start..id_end].trim();
+
+                // Clean up the message ID - remove urn:uuid: prefix if present
+                if message_id.starts_with("urn:uuid:") {
+                    return message_id[9..].to_string();
+                } else if !message_id.is_empty() {
+                    return message_id.to_string();
+                }
+            }
+        }
+    }
+
+    // Fallback to generating a new UUID
+    println!("Could not extract MessageID from probe request, generating new one");
+    generate_uuid()
+}
+
+fn create_hello_message(device_info: &DeviceInfo, message_id: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="{}" xmlns:wsd="{}">
 <soap:Header>
 <wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Hello</wsa:Action>
@@ -341,26 +359,19 @@ impl WSDiscoveryServer {
 </wsd:Hello>
 </soap:Body>
 </soap:Envelope>"#,
-            WS_ADDRESSING_NAMESPACE,
-            WS_DISCOVERY_NAMESPACE,
-            message_id,
-            self.device_info.endpoint_reference,
-            self.device_info.types,
-            self.device_info.scopes,
-            self.device_info.xaddrs
-        )
-    }
+        WS_ADDRESSING_NAMESPACE,
+        WS_DISCOVERY_NAMESPACE,
+        message_id,
+        device_info.endpoint_reference,
+        device_info.types,
+        device_info.scopes,
+        device_info.xaddrs
+    )
+}
 
-    /// Creates a Bye announcement message
-    ///
-    /// # Arguments
-    /// * `message_id` - Unique message identifier
-    ///
-    /// # Returns
-    /// * `String` - XML formatted Bye message
-    fn create_bye_message(&self, message_id: &str) -> String {
-        format!(
-            r#"<?xml version="1.0" encoding="utf-8"?>
+fn create_bye_message(device_info: &DeviceInfo, message_id: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="{}" xmlns:wsd="{}">
 <soap:Header>
 <wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Bye</wsa:Action>
@@ -379,27 +390,23 @@ impl WSDiscoveryServer {
 </wsd:Bye>
 </soap:Body>
 </soap:Envelope>"#,
-            WS_ADDRESSING_NAMESPACE,
-            WS_DISCOVERY_NAMESPACE,
-            message_id,
-            self.device_info.endpoint_reference,
-            self.device_info.types,
-            self.device_info.scopes,
-            self.device_info.xaddrs
-        )
-    }
+        WS_ADDRESSING_NAMESPACE,
+        WS_DISCOVERY_NAMESPACE,
+        message_id,
+        device_info.endpoint_reference,
+        device_info.types,
+        device_info.scopes,
+        device_info.xaddrs
+    )
+}
 
-    /// Creates a ProbeMatch response message
-    ///
-    /// # Arguments
-    /// * `message_id` - Unique message identifier
-    /// * `relates_to` - MessageID from the original Probe request
-    ///
-    /// # Returns
-    /// * `String` - XML formatted ProbeMatch message
-    fn create_probe_match_message(&self, message_id: &str, relates_to: &str) -> String {
-        format!(
-            r#"<?xml version="1.0" encoding="utf-8"?>
+fn create_probe_match_message(
+    device_info: &DeviceInfo,
+    message_id: &str,
+    relates_to: &str,
+) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="{}" xmlns:wsd="{}">
 <soap:Header>
 <wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/ProbeMatches</wsa:Action>
@@ -421,31 +428,70 @@ impl WSDiscoveryServer {
 </wsd:ProbeMatches>
 </soap:Body>
 </soap:Envelope>"#,
-            WS_ADDRESSING_NAMESPACE,
-            WS_DISCOVERY_NAMESPACE,
-            message_id,
-            relates_to,
-            self.device_info.endpoint_reference,
-            self.device_info.types,
-            self.device_info.scopes,
-            self.device_info.xaddrs
-        )
-    }
-
-    /// Generates a new UUID v4 string
-    ///
-    /// # Returns
-    /// * `String` - A new UUID v4 as a string
-    fn generate_uuid(&self) -> String {
-        Uuid::new_v4().to_string()
-    }
+        WS_ADDRESSING_NAMESPACE,
+        WS_DISCOVERY_NAMESPACE,
+        message_id,
+        relates_to,
+        device_info.endpoint_reference,
+        device_info.types,
+        device_info.scopes,
+        device_info.xaddrs
+    )
 }
 
-/// Implement Drop to send a Bye message when the server is dropped
-impl Drop for WSDiscoveryServer {
-    fn drop(&mut self) {
-        if let Err(e) = self.send_bye() {
-            eprintln!("Failed to send Bye message on drop: {e}");
-        }
+fn generate_uuid() -> String {
+    Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_probe_request() {
+        let probe_msg = r#"<soap:Envelope><soap:Body><d:Probe><d:Types>tdn:NetworkVideoTransmitter</d:Types></d:Probe></soap:Body></soap:Envelope>"#;
+        // Note: The simple contains check might fail if namespaces aren't exactly as expected in the constant,
+        // but the function checks for "Probe" and "Types" so it should pass.
+        // Let's make a more realistic probe message that matches the logic
+        let valid_probe = format!(
+            r#"<soap:Envelope xmlns:d="{}"><soap:Body><d:Probe><d:Types>tdn:NetworkVideoTransmitter</d:Types></d:Probe></soap:Body></soap:Envelope>"#,
+            WS_DISCOVERY_NAMESPACE
+        );
+        assert!(is_probe_request(&valid_probe));
+
+        let non_probe = "Just some random text";
+        assert!(!is_probe_request(non_probe));
+    }
+
+    #[test]
+    fn test_extract_message_id() {
+        let msg_with_id =
+            r#"<soap:Header><wsa:MessageID>urn:uuid:12345-67890</wsa:MessageID></soap:Header>"#;
+        assert_eq!(extract_message_id(msg_with_id), "12345-67890");
+
+        let msg_without_id = r#"<soap:Header><wsa:To>somewhere</wsa:To></soap:Header>"#;
+        // Should generate a new UUID (length 36)
+        assert_eq!(extract_message_id(msg_without_id).len(), 36);
+    }
+
+    #[test]
+    fn test_create_hello_message() {
+        let device_info = DeviceInfo {
+            endpoint_reference: "urn:uuid:test-endpoint".to_string(),
+            types: "tdn:TestDevice".to_string(),
+            scopes: "onvif://www.onvif.org/test".to_string(),
+            xaddrs: "http://127.0.0.1:8080/onvif".to_string(),
+            manufacturer: "Test Mfg".to_string(),
+            model_name: "Test Model".to_string(),
+            friendly_name: "Test Device".to_string(),
+            firmware_version: "1.0".to_string(),
+            serial_number: "12345".to_string(),
+        };
+
+        let hello = create_hello_message(&device_info, "test-message-id");
+        assert!(hello.contains("Hello"));
+        assert!(hello.contains("urn:uuid:test-message-id"));
+        assert!(hello.contains("urn:uuid:test-endpoint"));
+        assert!(hello.contains("tdn:TestDevice"));
     }
 }

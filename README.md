@@ -16,9 +16,7 @@
 
 ## Overview
 
-**ONVIF Media Transcoder** is a Docker-based solution that re-muxes input streams (HLS, MP4, RTSP, etc.)
-into ONVIF-compatible camera devices. It provides network discovery, media profiles, and authentication
-endpoints for integration with ONVIF clients.
+A Rust-based ONVIF Media Transcoder that converts media streams (RTSP, HTTP, etc.) into ONVIF-compatible RTSP streams. It includes a built-in WS-Discovery server for device discovery.
 
 ## Table of Contents
 
@@ -26,6 +24,7 @@ endpoints for integration with ONVIF clients.
   - [Overview](#overview)
   - [Table of Contents](#table-of-contents)
   - [Features](#features)
+  - [Architecture](#architecture)
   - [Quick Start](#quick-start)
     - [Quick Start Script](#quick-start-script)
     - [Docker Run](#docker-run)
@@ -309,6 +308,28 @@ If experiencing stream lag or quality issues:
 2. **Network Bandwidth**: Ensure sufficient bandwidth for re-muxing
 3. **Hardware Resources**: Monitor CPU usage during stream processing
 4. **Container Resources**: Increase Docker memory/CPU limits if needed
+
+### Running Multiple Containers
+
+When running multiple instances on the same host, ensure unique ports:
+
+1. **RTSP Ports**: Use different `RTSP_OUTPUT_PORT` values (e.g., 8554, 8564, 8574)
+2. **ONVIF Ports**: Use different `ONVIF_PORT` values (e.g., 8080, 8081, 8082)  
+3. **Port Mapping**: Update Docker port mappings accordingly:
+
+   ```bash
+   # First container
+   docker run -p 8080:8080 -p 8554:8554 -p 3702:3702/udp ...
+   
+   # Second container
+   docker run -p 8081:8081 -p 8564:8564 -p 3703:3703/udp \
+     -e ONVIF_PORT=8081 -e RTSP_OUTPUT_PORT=8564 ...
+   ```
+
+4. **Internal Ports**: The application automatically calculates unique internal RTP/RTCP/RTMP ports
+   based on RTSP port to avoid conflicts (e.g., RTSP: 8554 → RTP: 9554, RTCP: 9555, RTMP: 10554)
+5. **WS-Discovery**: Each container should use a unique WS-Discovery port (3702, 3703, etc.)
+   for device discovery
 
 ## Development
 

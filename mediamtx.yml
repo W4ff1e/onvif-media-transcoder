@@ -6,6 +6,15 @@ logDestinations: [stdout]
 
 # RTSP server configuration
 rtspAddress: :RTSP_PORT_PLACEHOLDER
+# Use unique ports to avoid conflicts when running multiple containers
+rtpAddress: :RTP_PORT_PLACEHOLDER
+rtcpAddress: :RTCP_PORT_PLACEHOLDER
+
+# Configure protocols with unique ports to avoid conflicts
+rtmp: true
+rtmpAddress: :RTMP_PORT_PLACEHOLDER
+hls: false
+webrtc: false
 
 # Network optimizations
 writeQueueSize: 1024

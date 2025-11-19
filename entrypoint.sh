@@ -153,40 +153,52 @@ validate_env() {
 echo "Validating environment variables..."
 validate_env
 
+# Validate INPUT_URL reachability
+if [ -n "$INPUT_URL" ]; then
+    echo "INFO: Validating input stream: $INPUT_URL"
+    echo "INFO: This may take a few seconds..."
+    
+    # Use ffprobe to check if the stream is readable
+    # -v error: Only show errors
+    # -show_format: Try to read container format
+    # -rw_timeout: Timeout in microseconds (10 seconds) for read/write operations (for network streams)
+    # timeout command: Hard timeout for the whole process (15 seconds)
+    if ! timeout 15s ffprobe -v error -show_format -rw_timeout 10000000 -i "$INPUT_URL" > /dev/null 2>&1; then
+         echo "ERROR: Unable to connect to INPUT_URL: $INPUT_URL"
+         echo "       Please check if the stream is online and accessible."
+         echo "       Validation failed. Exiting."
+         exit 1
+    fi
+    echo "INFO: Input stream is valid and reachable."
+fi
+
 # Configuration summary
 # MediaMTX will handle the input stream and serve it as an ONVIF-compatible RTSP stream
 
 # Get the container's actual IP address (not 0.0.0.0)
-CONTAINER_IP=$(hostname -i | awk '{print $1}' 2>/dev/null)
-if [ -z "$CONTAINER_IP" ] || [ "$CONTAINER_IP" = "0.0.0.0" ] || [ "$CONTAINER_IP" = "127.0.0.1" ]; then
-    # Fallback methods to get container IP
-    echo "INFO: Primary IP detection failed, trying fallback methods..."
+# Allow user to override with CONTAINER_IP environment variable
+if [ -z "$CONTAINER_IP" ]; then
+    CONTAINER_IP=$(hostname -i | awk '{print $1}' 2>/dev/null)
     
-    # Try ip route method
-    CONTAINER_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
-    if [ -z "$CONTAINER_IP" ] || [ "$CONTAINER_IP" = "0.0.0.0" ]; then
-        # Try hostname -I method
-        CONTAINER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    # Fallback if hostname -i fails or returns loopback
+    if [ -z "$CONTAINER_IP" ] || [ "$CONTAINER_IP" = "127.0.0.1" ]; then
+        CONTAINER_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
     fi
     
-    # Try parsing /proc/net/route
-    if [ -z "$CONTAINER_IP" ] || [ "$CONTAINER_IP" = "0.0.0.0" ]; then
-        CONTAINER_IP=$(awk '/^[0-9A-F]{8}\s+00000000/ {print $1}' /proc/net/route 2>/dev/null | head -n1 | sed 's/\(..\)\(..\)\(..\)\(..\)/printf "%d.%d.%d.%d" 0x\4 0x\3 0x\2 0x\1/' | sh 2>/dev/null)
-    fi
-    
-    # Final fallback to Docker bridge network detection
-    if [ -z "$CONTAINER_IP" ] || [ "$CONTAINER_IP" = "0.0.0.0" ]; then
-        CONTAINER_IP=$(ip addr show eth0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
-    fi
-    
-    # Ultimate fallback
-    if [ -z "$CONTAINER_IP" ] || [ "$CONTAINER_IP" = "0.0.0.0" ]; then
-        echo "WARNING: Could not determine container IP, using localhost"
+    if [ -z "$CONTAINER_IP" ]; then
+        echo "WARNING: Could not determine container IP, defaulting to 127.0.0.1"
         CONTAINER_IP="127.0.0.1"
     fi
 fi
 
 echo "INFO: Container IP detected as: $CONTAINER_IP"
+
+# Handle root path case explicitly to ensure consistency
+if [ "$RTSP_PATH" = "/" ]; then
+    echo "INFO: RTSP_PATH is '/', defaulting to '/stream' for internal consistency"
+    RTSP_PATH="/stream"
+    export RTSP_PATH
+fi
 
 RTSP_OUTPUT_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 
@@ -203,62 +215,15 @@ echo "  WS-Discovery: ${WS_DISCOVERY_ENABLED}"
 # Calculate the RTSP stream URL for the Rust application
 export RTSP_STREAM_URL="rtsp://${CONTAINER_IP}:${RTSP_OUTPUT_PORT}${RTSP_PATH}"
 
-# Function to manage MediaMTX logs with size capping
-manage_mediamtx_logs() {
-    local log_file="/tmp/mediamtx.log"
-    local max_lines=250
-    local keep_head=100
-    local keep_tail=150
-    
-    # Monitor log file size and truncate if needed
-    while true; do
-        sleep 30
-        if [ -f "$log_file" ]; then
-            local line_count=$(wc -l < "$log_file")
-            if [ $line_count -gt $max_lines ]; then
-                echo "$(date): MediaMTX log reached $line_count lines, truncating..." >> "$log_file"
-                
-                # Keep first 100 and last 150 lines
-                head -n $keep_head "$log_file" > "${log_file}.tmp"
-                echo "" >> "${log_file}.tmp"
-                echo "=== LOG TRUNCATED $(date) ===" >> "${log_file}.tmp"
-                echo "" >> "${log_file}.tmp"
-                tail -n $keep_tail "$log_file" >> "${log_file}.tmp"
-                mv "${log_file}.tmp" "$log_file"
-                
-                echo "$(date): MediaMTX log truncated, keeping first $keep_head and last $keep_tail lines" >> "$log_file"
-            fi
-        fi
-    done
-}
-
-
-
-# Function to dump MediaMTX logs on error
-dump_mediamtx_logs() {
-    local log_file="/tmp/mediamtx.log"
-    if [ -f "$log_file" ]; then
-        echo "========================================" 
-        echo "MediaMTX Log (All 250 lines: first 100 + last 150):"
-        echo "========================================"
-        cat "$log_file"
-        echo "========================================"
-    else
-        echo "No MediaMTX log file found"
-    fi
-}
-
-
-
 # Create dynamic MediaMTX configuration with correct RTSP path and port
 STREAM_NAME="${RTSP_PATH#/}"  # Remove leading slash
-if [ -z "$STREAM_NAME" ] || [ "$STREAM_NAME" = "/" ]; then
+if [ -z "$STREAM_NAME" ]; then
     echo "INFO: RTSP_PATH resulted in empty stream name, using default 'stream'"
-    STREAM_NAME="stream"  # Default if path is just "/" or empty
+    STREAM_NAME="stream"
 fi
 
 # Validate stream name doesn't contain invalid characters
-if echo "$STREAM_NAME" | grep -q '[^a-zA-Z0-9_-]'; then
+if echo "$STREAM_NAME" | grep -q '[^a-zA-Z0-9/_-]'; then
     echo "WARNING: RTSP_PATH contains special characters that may cause issues: $STREAM_NAME"
     echo "         Recommended format: /stream or /camera1 etc."
 fi
@@ -266,22 +231,36 @@ fi
 echo "INFO: MediaMTX stream will be available as: $STREAM_NAME"
 
 # Update MediaMTX config with the correct stream path and port
-sed -e "s|STREAM_PATH_PLACEHOLDER|${STREAM_NAME}|g" \
-    -e "s|RTSP_PORT_PLACEHOLDER|${RTSP_OUTPUT_PORT}|g" \
-    -e "s|SOURCE_PLACEHOLDER|${INPUT_URL}|g" \
+# Generate unique RTP/RTCP ports based on RTSP port to avoid conflicts between containers
+RTP_PORT=$((RTSP_OUTPUT_PORT + 1000))  # e.g., 8554 -> 9554
+RTCP_PORT=$((RTSP_OUTPUT_PORT + 1001)) # e.g., 8554 -> 9555
+RTMP_PORT=$((RTSP_OUTPUT_PORT + 2000)) # e.g., 8554 -> 10554
+
+echo "INFO: MediaMTX ports will be - RTSP: ${RTSP_OUTPUT_PORT}, RTP: ${RTP_PORT}, RTCP: ${RTCP_PORT}, RTMP: ${RTMP_PORT}"
+
+# Use a safer delimiter (~) for sed to avoid issues with URLs containing / or |
+# We assume ~ is rare in URLs, but we should be careful.
+# Alternatively, we can escape the input.
+sed -e "s~STREAM_PATH_PLACEHOLDER~${STREAM_NAME}~g" \
+    -e "s~RTSP_PORT_PLACEHOLDER~${RTSP_OUTPUT_PORT}~g" \
+    -e "s~RTP_PORT_PLACEHOLDER~${RTP_PORT}~g" \
+    -e "s~RTCP_PORT_PLACEHOLDER~${RTCP_PORT}~g" \
+    -e "s~RTMP_PORT_PLACEHOLDER~${RTMP_PORT}~g" \
+    -e "s~SOURCE_PLACEHOLDER~${INPUT_URL}~g" \
     /etc/mediamtx.yml > /tmp/mediamtx.yml
 
 echo "INFO: MediaMTX configuration generated successfully"
+echo "INFO: MediaMTX Paths Configuration:"
+grep -A 5 "paths:" /tmp/mediamtx.yml
 
 # Start MediaMTX RTSP server
+# Log to stdout/stderr directly so we can see issues
 echo "Starting MediaMTX RTSP server..."
-mediamtx /tmp/mediamtx.yml > /tmp/mediamtx.log 2>&1 &
+mediamtx /tmp/mediamtx.yml &
 MEDIAMTX_PID=$!
 
 if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
     echo "ERROR: Failed to start MediaMTX RTSP server"
-    echo "MediaMTX log output:"
-    cat /tmp/mediamtx.log
     exit 1
 fi
 echo "MediaMTX started with PID: $MEDIAMTX_PID"
@@ -289,7 +268,7 @@ echo "MediaMTX started with PID: $MEDIAMTX_PID"
 # Wait for MediaMTX to start and begin listening
 echo "Waiting for MediaMTX to initialize..."
 mediamtx_ready=false
-for i in $(seq 1 20); do
+for i in $(seq 1 10); do
     sleep 2
     if netstat -ln 2>/dev/null | grep -q ":${RTSP_OUTPUT_PORT} " || ss -ln 2>/dev/null | grep -q ":${RTSP_OUTPUT_PORT} "; then
         echo "MediaMTX is listening on port ${RTSP_OUTPUT_PORT}"
@@ -301,18 +280,12 @@ done
 
 if [ "$mediamtx_ready" = "false" ]; then
     echo "WARNING: MediaMTX may not be ready, but continuing..."
-    dump_mediamtx_logs
 fi
-
-# Start MediaMTX log management in background
-manage_mediamtx_logs &
-MEDIAMTX_LOG_MANAGER_PID=$!
 
 # Check if MediaMTX is still running before proceeding
 if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
     echo "ERROR: MediaMTX process died during startup (PID: $MEDIAMTX_PID)"
     echo "MediaMTX exit status: $(wait $MEDIAMTX_PID 2>/dev/null; echo $?)"
-    dump_mediamtx_logs
     exit 1
 fi
 
@@ -322,32 +295,33 @@ mkdir -p /tmp
 # MediaMTX is now ready to serve streams
 echo "MediaMTX RTSP server is ready to serve streams"
 echo "Stream will be available at: ${RTSP_OUTPUT_URL}"
-echo "Check logs for details:"
-echo "  - MediaMTX: /tmp/mediamtx.log"
 
 # Verify the Rust binary exists
 if [ ! -f "/usr/local/bin/onvif-media-transcoder" ]; then
     echo "ERROR: Rust binary not found at /usr/local/bin/onvif-media-transcoder"
-    dump_mediamtx_logs
-    kill $MEDIAMTX_PID $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
+    kill $MEDIAMTX_PID 2>/dev/null
     exit 1
 fi
 
-# Start ONVIF service with direct stdout/stderr output
-echo "Starting ONVIF service..."
-/usr/local/bin/onvif-media-transcoder \
-    --rtsp-stream-url "${RTSP_STREAM_URL}" \
-    --onvif-port "${ONVIF_PORT}" \
-    --device-name "${DEVICE_NAME}" \
-    --onvif-username "${ONVIF_USERNAME}" \
-    --onvif-password "${ONVIF_PASSWORD}" \
-    --container-ip "${CONTAINER_IP}" \
-    $([ "$WS_DISCOVERY_ENABLED" = "true" ] && echo "--ws-discovery-enabled") \
-    $([ "$DEBUGLOGGING" = "true" ] && echo "--debug") &
-ONVIF_SERVICE_PID=$!
+# Prepare flags for the ONVIF service
+WS_DISCOVERY_FLAG=$([ "$WS_DISCOVERY_ENABLED" = "true" ] && echo "--ws-discovery-enabled")
+DEBUG_FLAG=$([ "$DEBUGLOGGING" = "true" ] && echo "--debug")
 
-# Give it a moment to start
-sleep 3
+# Start the ONVIF Media Transcoder
+echo "Starting ONVIF Media Transcoder..."
+echo "Command: /usr/local/bin/onvif-media-transcoder -r \"$RTSP_STREAM_URL\" -P \"$ONVIF_PORT\" -n \"$DEVICE_NAME\" -u \"$ONVIF_USERNAME\" -p \"$ONVIF_PASSWORD\" --container-ip \"$CONTAINER_IP\" $WS_DISCOVERY_FLAG $DEBUG_FLAG"
+
+# Start ONVIF service in background so we can monitor it
+/usr/local/bin/onvif-media-transcoder \
+    -r "$RTSP_STREAM_URL" \
+    -P "$ONVIF_PORT" \
+    -n "$DEVICE_NAME" \
+    -u "$ONVIF_USERNAME" \
+    -p "$ONVIF_PASSWORD" \
+    --container-ip "$CONTAINER_IP" \
+    $WS_DISCOVERY_FLAG \
+    $DEBUG_FLAG &
+ONVIF_SERVICE_PID=$!
 
 echo "ONVIF service started with PID: $ONVIF_SERVICE_PID"
 
@@ -362,8 +336,6 @@ fi
 echo "RTSP Stream: ${RTSP_OUTPUT_URL}"
 echo "ONVIF Endpoint: http://${CONTAINER_IP}:${ONVIF_PORT}/onvif/"
 echo "Note: Input stream is served via MediaMTX RTSP server"
-echo "Log files:"
-echo "  - MediaMTX: /tmp/mediamtx.log (capped at 250 lines: first 100 + last 150)"
 echo "========================================"
 
 # Function to handle shutdown
@@ -371,7 +343,6 @@ cleanup_services() {
     echo "Shutting down services..."
     kill $ONVIF_SERVICE_PID 2>/dev/null
     kill $MEDIAMTX_PID 2>/dev/null
-    kill $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null
     wait
     echo "All services stopped."
 }
@@ -385,7 +356,6 @@ monitor_all_services() {
         
         if ! kill -0 $MEDIAMTX_PID 2>/dev/null; then
             echo "ERROR: MediaMTX process died (PID: $MEDIAMTX_PID)"
-            dump_mediamtx_logs
             cleanup_services
             exit 1
         fi
@@ -395,13 +365,6 @@ monitor_all_services() {
             echo "ONVIF service output should be visible in the main log output above"
             cleanup_services
             exit 1
-        fi
-        
-        if ! kill -0 $MEDIAMTX_LOG_MANAGER_PID 2>/dev/null; then
-            echo "WARNING: MediaMTX log manager died (PID: $MEDIAMTX_LOG_MANAGER_PID), restarting..."
-            manage_mediamtx_logs &
-            MEDIAMTX_LOG_MANAGER_PID=$!
-            echo "MediaMTX log manager restarted with PID: $MEDIAMTX_LOG_MANAGER_PID"
         fi
     done
 }
