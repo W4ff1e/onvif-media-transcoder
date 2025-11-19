@@ -494,4 +494,54 @@ mod tests {
         assert!(hello.contains("urn:uuid:test-endpoint"));
         assert!(hello.contains("tdn:TestDevice"));
     }
+
+    #[test]
+    fn test_create_bye_message() {
+        let device_info = DeviceInfo {
+            endpoint_reference: "urn:uuid:test-endpoint".to_string(),
+            types: "tdn:TestDevice".to_string(),
+            scopes: "onvif://www.onvif.org/test".to_string(),
+            xaddrs: "http://127.0.0.1:8080/onvif".to_string(),
+            manufacturer: "Test Mfg".to_string(),
+            model_name: "Test Model".to_string(),
+            friendly_name: "Test Device".to_string(),
+            firmware_version: "1.0".to_string(),
+            serial_number: "12345".to_string(),
+        };
+
+        let bye = create_bye_message(&device_info, "test-message-id");
+        assert!(bye.contains("Bye"));
+        assert!(bye.contains("urn:uuid:test-message-id"));
+        assert!(bye.contains("urn:uuid:test-endpoint"));
+    }
+
+    #[test]
+    fn test_create_probe_match_message() {
+        let device_info = DeviceInfo {
+            endpoint_reference: "urn:uuid:test-endpoint".to_string(),
+            types: "tdn:TestDevice".to_string(),
+            scopes: "onvif://www.onvif.org/test".to_string(),
+            xaddrs: "http://127.0.0.1:8080/onvif".to_string(),
+            manufacturer: "Test Mfg".to_string(),
+            model_name: "Test Model".to_string(),
+            friendly_name: "Test Device".to_string(),
+            firmware_version: "1.0".to_string(),
+            serial_number: "12345".to_string(),
+        };
+
+        let probe_match =
+            create_probe_match_message(&device_info, "test-message-id", "relates-to-id");
+        assert!(probe_match.contains("ProbeMatches"));
+        assert!(probe_match.contains("urn:uuid:test-message-id"));
+        assert!(probe_match.contains("relates-to-id"));
+        assert!(probe_match.contains("urn:uuid:test-endpoint"));
+    }
+
+    #[test]
+    fn test_generate_uuid() {
+        let uuid1 = generate_uuid();
+        let uuid2 = generate_uuid();
+        assert_eq!(uuid1.len(), 36);
+        assert_ne!(uuid1, uuid2);
+    }
 }

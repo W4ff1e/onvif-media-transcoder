@@ -1,14 +1,12 @@
 // ONVIF Response Templates
 // This module contains all the hardcoded ONVIF SOAP responses
 
+use crate::onvif::soap::SoapResponseBuilder;
 use chrono::{Datelike, Timelike};
 
 pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+    let body_content = format!(
+        r#"<tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
 <tds:Capabilities>
 <tt:Device xmlns:tt="http://www.onvif.org/ver10/schema">
 <tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
@@ -58,18 +56,15 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 </tt:StreamingCapabilities>
 </tt:Media>
 </tds:Capabilities>
-</tds:GetCapabilitiesResponse>
-</soap:Body>
-</soap:Envelope>"#
-    )
+</tds:GetCapabilitiesResponse>"#
+    );
+
+    SoapResponseBuilder::new().set_body(&body_content).build()
 }
 
 pub fn get_services_response(container_ip: &str, onvif_port: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+    let body_content = format!(
+        r#"<tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
 <tds:Service>
 <tds:Namespace>http://www.onvif.org/ver10/device/wsdl</tds:Namespace>
 <tds:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tds:XAddr>
@@ -127,17 +122,14 @@ pub fn get_services_response(container_ip: &str, onvif_port: &str) -> String {
 <tds:Minor>60</tds:Minor>
 </tds:Version>
 </tds:Service>
-</tds:GetServicesResponse>
-</soap:Body>
-</soap:Envelope>"#
-    )
+</tds:GetServicesResponse>"#
+    );
+
+    SoapResponseBuilder::new().set_body(&body_content).build()
 }
 
 pub fn get_profiles_response() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    let body_content = r#"<trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:Profiles token="HQProfile" fixed="true">
 <tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">HQProfile</tt:Name>
 <tt:VideoSourceConfiguration token="VideoSourceConfig_HQ">
@@ -216,51 +208,41 @@ pub fn get_profiles_response() -> String {
 <tt:SessionTimeout>PT60S</tt:SessionTimeout>
 </tt:VideoEncoderConfiguration>
 </trt:Profiles>
-</trt:GetProfilesResponse>
-</soap:Body>
-</soap:Envelope>"#
-        .to_string()
+</trt:GetProfilesResponse>"#;
+
+    SoapResponseBuilder::new().set_body(body_content).build()
 }
 
 pub fn get_stream_uri_response(rtsp_stream: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    let body_content = format!(
+        r#"<trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:MediaUri>
 <tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">{rtsp_stream}</tt:Uri>
 </trt:MediaUri>
-</trt:GetStreamUriResponse>
-</soap:Body>
-</soap:Envelope>"#
-    )
+</trt:GetStreamUriResponse>"#
+    );
+
+    SoapResponseBuilder::new().set_body(&body_content).build()
 }
 
 pub fn get_device_info_response(device_name: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+    let body_content = format!(
+        r#"<tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
 <tds:Manufacturer>ONVIF Media Solutions</tds:Manufacturer>
 <tds:Model>{}</tds:Model>
 <tds:FirmwareVersion>1.0.0</tds:FirmwareVersion>
 <tds:SerialNumber>EMU-{}</tds:SerialNumber>
 <tds:HardwareId>onvif-media-transcoder</tds:HardwareId>
-</tds:GetDeviceInformationResponse>
-</soap:Body>
-</soap:Envelope>"#,
+</tds:GetDeviceInformationResponse>"#,
         device_name,
         device_name.chars().take(6).collect::<String>()
-    )
+    );
+
+    SoapResponseBuilder::new().set_body(&body_content).build()
 }
 
 pub fn get_video_sources_response() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetVideoSourcesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    let body_content = r#"<trt:GetVideoSourcesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:VideoSources token="VideoSource_1">
 <tt:Framerate xmlns:tt="http://www.onvif.org/ver10/schema">15</tt:Framerate>
 <tt:Resolution xmlns:tt="http://www.onvif.org/ver10/schema">
@@ -268,17 +250,13 @@ pub fn get_video_sources_response() -> String {
 <tt:Height>540</tt:Height>
 </tt:Resolution>
 </trt:VideoSources>
-</trt:GetVideoSourcesResponse>
-</soap:Body>
-</soap:Envelope>"#
-        .to_string()
+</trt:GetVideoSourcesResponse>"#;
+
+    SoapResponseBuilder::new().set_body(body_content).build()
 }
 
 pub fn get_service_capabilities_response() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetServiceCapabilitiesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    let body_content = r#"<trt:GetServiceCapabilitiesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:Capabilities>
 <tt:ProfileCapabilities xmlns:tt="http://www.onvif.org/ver10/schema">
 <tt:MaximumNumberOfProfiles>2</tt:MaximumNumberOfProfiles>
@@ -289,17 +267,13 @@ pub fn get_service_capabilities_response() -> String {
 <tt:RTP_RTSP_TCP>true</tt:RTP_RTSP_TCP>
 </tt:StreamingCapabilities>
 </trt:Capabilities>
-</trt:GetServiceCapabilitiesResponse>
-</soap:Body>
-</soap:Envelope>"#
-        .to_string()
+</trt:GetServiceCapabilitiesResponse>"#;
+
+    SoapResponseBuilder::new().set_body(body_content).build()
 }
 
 pub fn get_video_source_configurations_response() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetVideoSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    let body_content = r#"<trt:GetVideoSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:Configurations token="VideoSourceConfig_HQ">
 <tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
@@ -312,17 +286,13 @@ pub fn get_video_source_configurations_response() -> String {
 <tt:SourceToken>VideoSource_1</tt:SourceToken>
 <tt:Bounds x="0" y="0" width="960" height="540"/>
 </trt:Configurations>
-</trt:GetVideoSourceConfigurationsResponse>
-</soap:Body>
-</soap:Envelope>"#
-        .to_string()
+</trt:GetVideoSourceConfigurationsResponse>"#;
+
+    SoapResponseBuilder::new().set_body(body_content).build()
 }
 
 pub fn get_video_encoder_configurations_response() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetVideoEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    let body_content = r#"<trt:GetVideoEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:Configurations token="VideoEncoderConfig_HQ">
 <tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoEncoderConfig_HQ</tt:Name>
 <tt:UseCount>1</tt:UseCount>
@@ -383,48 +353,32 @@ pub fn get_video_encoder_configurations_response() -> String {
 </tt:Multicast>
 <tt:SessionTimeout>PT60S</tt:SessionTimeout>
 </trt:Configurations>
-</trt:GetVideoEncoderConfigurationsResponse>
-</soap:Body>
-</soap:Envelope>"#
-        .to_string()
+</trt:GetVideoEncoderConfigurationsResponse>"#;
+
+    SoapResponseBuilder::new().set_body(body_content).build()
 }
 
 pub fn get_audio_source_configurations_response() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetAudioSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-</trt:GetAudioSourceConfigurationsResponse>
-</soap:Body>
-</soap:Envelope>"#
-        .to_string()
+    let body_content = r#"<trt:GetAudioSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+</trt:GetAudioSourceConfigurationsResponse>"#;
+
+    SoapResponseBuilder::new().set_body(body_content).build()
 }
 
 pub fn get_audio_encoder_configurations_response() -> String {
-    r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetAudioEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-</trt:GetAudioEncoderConfigurationsResponse>
-</soap:Body>
-</soap:Envelope>"#
-        .to_string()
+    let body_content = r#"<trt:GetAudioEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+</trt:GetAudioEncoderConfigurationsResponse>"#;
+
+    SoapResponseBuilder::new().set_body(body_content).build()
 }
 
 pub fn get_auth_required_response() -> String {
     // Generate a fresh nonce for each authentication challenge
     let nonce = uuid::Uuid::new_v4().to_string().replace('-', "");
 
-    format!(
-        r#"HTTP/1.1 401 Unauthorized
-WWW-Authenticate: Digest realm="ONVIF Camera", nonce="{nonce}", qop="auth", stale=false
-Content-Type: application/soap+xml; charset=utf-8
-Content-Length: 350
-
-<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<soap:Fault>
+    let soap_response = SoapResponseBuilder::new()
+        .set_body(
+            r#"<soap:Fault>
 <soap:Code>
 <soap:Value>soap:Sender</soap:Value>
 <soap:Subcode>
@@ -434,22 +388,22 @@ Content-Length: 350
 <soap:Reason>
 <soap:Text xml:lang="en">Authentication required</soap:Text>
 </soap:Reason>
-</soap:Fault>
-</soap:Body>
-</soap:Envelope>
-"#
+</soap:Fault>"#,
+        )
+        .build();
+
+    format!(
+        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Digest realm=\"ONVIF Camera\", nonce=\"{nonce}\", qop=\"auth\", stale=false\r\nContent-Type: application/soap+xml; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+        soap_response.len(),
+        soap_response
     )
 }
 
 pub fn get_ws_security_auth_fault() -> String {
-    r#"HTTP/1.1 401 Unauthorized
-Content-Type: application/soap+xml; charset=utf-8
-Content-Length: 546
-
-<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:ter="http://www.onvif.org/ver10/error">
-<soap:Body>
-<soap:Fault>
+    let soap_response = SoapResponseBuilder::new()
+        .add_namespace("ter", "http://www.onvif.org/ver10/error")
+        .set_body(
+            r#"<soap:Fault>
 <soap:Code>
 <soap:Value>soap:Sender</soap:Value>
 <soap:Subcode>
@@ -462,10 +416,15 @@ Content-Length: 546
 <soap:Detail>
 <soap:Text>WS-Security authentication required. Please provide UsernameToken with PasswordDigest or PasswordText.</soap:Text>
 </soap:Detail>
-</soap:Fault>
-</soap:Body>
-</soap:Envelope>
-"#.to_string()
+</soap:Fault>"#,
+        )
+        .build();
+
+    format!(
+        "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/soap+xml; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+        soap_response.len(),
+        soap_response
+    )
 }
 
 pub fn get_default_response() -> String {
@@ -473,29 +432,23 @@ pub fn get_default_response() -> String {
 }
 
 pub fn get_snapshot_uri_response(container_ip: &str, onvif_port: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<trt:GetSnapshotUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    let body_content = format!(
+        r#"<trt:GetSnapshotUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
 <trt:MediaUri>
 <tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">http://{container_ip}:{onvif_port}/snapshot.jpg</tt:Uri>
 </trt:MediaUri>
-</trt:GetSnapshotUriResponse>
-</soap:Body>
-</soap:Envelope>"#
-    )
+</trt:GetSnapshotUriResponse>"#
+    );
+
+    SoapResponseBuilder::new().set_body(&body_content).build()
 }
 
 pub fn get_system_date_time_response() -> String {
     // Get current UTC time
     let now = chrono::Utc::now();
 
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
-<soap:Body>
-<tds:GetSystemDateAndTimeResponse>
+    let body_content = format!(
+        r#"<tds:GetSystemDateAndTimeResponse>
 <tds:SystemDateAndTime>
 <tt:DateTimeType>NTP</tt:DateTimeType>
 <tt:DaylightSavings>false</tt:DaylightSavings>
@@ -515,24 +468,25 @@ pub fn get_system_date_time_response() -> String {
 </tt:Date>
 </tt:UTCDateTime>
 </tds:SystemDateAndTime>
-</tds:GetSystemDateAndTimeResponse>
-</soap:Body>
-</soap:Envelope>"#,
+</tds:GetSystemDateAndTimeResponse>"#,
         now.hour(),
         now.minute(),
         now.second(),
         now.year(),
         now.month(),
         now.day()
-    )
+    );
+
+    SoapResponseBuilder::new()
+        .add_namespace("tds", "http://www.onvif.org/ver10/device/wsdl")
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(&body_content)
+        .build()
 }
 
 pub fn get_unsupported_endpoint_response(endpoint: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-<soap:Body>
-<soap:Fault>
+    let body_content = format!(
+        r#"<soap:Fault>
 <soap:Code>
 <soap:Value>soap:Receiver</soap:Value>
 </soap:Code>
@@ -547,8 +501,8 @@ pub fn get_unsupported_endpoint_response(endpoint: &str) -> String {
 <ter:Detail>This ONVIF Media Transcoder supports basic streaming functionality. The requested operation is not implemented.</ter:Detail>
 </ter:Action>
 </soap:Detail>
-</soap:Fault>
-</soap:Body>
-</soap:Envelope>"#
-    )
+</soap:Fault>"#
+    );
+
+    SoapResponseBuilder::new().set_body(&body_content).build()
 }
