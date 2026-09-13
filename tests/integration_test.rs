@@ -1,6 +1,6 @@
 //! End-to-end tests over a real TCP socket against the ONVIF HTTP service.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use clap::Parser;
 use onvif_media_transcoder::config::Config;
 use onvif_media_transcoder::identity::DeviceIdentity;

@@ -10,10 +10,10 @@ pub mod stream_info;
 use crate::config::Config;
 use crate::identity::DeviceIdentity;
 use auth::{AuthResult, Authenticator};
-use soap::{soap_fault, FaultCode, SoapRequest};
+use soap::{FaultCode, SoapRequest, soap_fault};
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use stream_info::StreamProbe;
@@ -477,7 +477,7 @@ impl ServerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
     use clap::Parser;
 
     fn service() -> OnvifService {
@@ -599,7 +599,9 @@ mod tests {
                 .status,
             200
         );
-        let bad = envelope("<trt:GetStreamUri xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\"><trt:ProfileToken>Nope</trt:ProfileToken></trt:GetStreamUri>");
+        let bad = envelope(
+            "<trt:GetStreamUri xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\"><trt:ProfileToken>Nope</trt:ProfileToken></trt:GetStreamUri>",
+        );
         let r = svc.handle("POST", "/onvif/media_service", Some(&basic()), &bad);
         assert_eq!(r.status, 400);
         assert!(r.body_str().contains("ter:InvalidArgVal"));
@@ -610,13 +612,16 @@ mod tests {
         let svc = service();
         let body = envelope("<GetServiceCapabilities/>");
         let dev = svc.handle("POST", "/onvif/device_service", None, &body);
-        assert!(dev
-            .body_str()
-            .contains("tds:GetServiceCapabilitiesResponse"));
+        assert!(
+            dev.body_str()
+                .contains("tds:GetServiceCapabilitiesResponse")
+        );
         let media = svc.handle("POST", "/onvif/media_service", None, &body);
-        assert!(media
-            .body_str()
-            .contains("trt:GetServiceCapabilitiesResponse"));
+        assert!(
+            media
+                .body_str()
+                .contains("trt:GetServiceCapabilitiesResponse")
+        );
     }
 
     #[test]
@@ -626,10 +631,11 @@ mod tests {
         // that clients probing for the auth scheme (curl --digest) can proceed.
         let r = svc.handle("POST", "/onvif/device_service", None, b"");
         assert_eq!(r.status, 401);
-        assert!(r
-            .headers
-            .iter()
-            .any(|(k, v)| k == "WWW-Authenticate" && v.starts_with("Digest")));
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| k == "WWW-Authenticate" && v.starts_with("Digest"))
+        );
         let r = svc.handle("POST", "/onvif/device_service", Some(&basic()), b"<not xml");
         assert_eq!(r.status, 400);
         assert!(r.body_str().contains("ter:WellFormed"));

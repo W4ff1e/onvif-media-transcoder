@@ -1,19 +1,6 @@
-# Rust build artifacts
-target/
-
-# Documentation
-README.md
-LICENSE
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
+# Only Cargo.toml, Cargo.lock, src/ and entrypoint.sh are needed to build.
+*
+!Cargo.toml
+!Cargo.lock
+!src/
+!entrypoint.sh

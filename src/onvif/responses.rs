@@ -4,7 +4,7 @@
 //! escaped; namespaces are declared once on the envelope.
 
 use crate::identity::DeviceIdentity;
-use crate::onvif::soap::{xml_escape, SoapResponseBuilder};
+use crate::onvif::soap::{SoapResponseBuilder, xml_escape};
 use crate::onvif::stream_info::{StreamInfo, VideoEncoding};
 use chrono::{Datelike, Timelike};
 use std::net::Ipv4Addr;

@@ -1,6 +1,6 @@
 //! JPEG snapshot capture from the RTSP stream using ffmpeg.
 
-use crate::onvif::process::{run_with_timeout, ProcessError};
+use crate::onvif::process::{ProcessError, run_with_timeout};
 use std::sync::Mutex;
 use std::time::Duration;
 use tracing::debug;

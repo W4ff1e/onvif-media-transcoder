@@ -1,7 +1,7 @@
 //! The identity this device presents to ONVIF clients, shared by
 //! WS-Discovery announcements and the GetDeviceInformation response.
 
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use std::net::Ipv4Addr;
 use uuid::Uuid;
 

@@ -117,7 +117,7 @@ impl Config {
     /// authentication. Clients receive the plain URL and use their own
     /// device credentials, as ONVIF specifies.
     pub fn internal_rtsp_url(&self) -> String {
-        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+        use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
         let Some(rest) = self.rtsp_stream_url.strip_prefix("rtsp://") else {
             return self.rtsp_stream_url.clone();
         };

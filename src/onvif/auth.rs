@@ -6,7 +6,7 @@
 //! header cannot be replayed.
 
 use crate::onvif::soap::{PasswordType, UsernameToken};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use sha1::Digest as _;
 use std::collections::HashMap;
 use std::sync::Mutex;
