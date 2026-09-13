@@ -1,10 +1,9 @@
 //! JPEG snapshot capture from the RTSP stream using ffmpeg.
 
-use std::io::Read;
-use std::process::{Command, Stdio};
+use crate::onvif::process::{run_with_timeout, ProcessError};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
-use tracing::{debug, warn};
+use std::time::Duration;
+use tracing::debug;
 
 /// Hard limit on how long a snapshot capture may take.
 pub const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,8 +40,9 @@ pub fn capture_jpeg(rtsp_url: &str) -> Result<Vec<u8>, SnapshotError> {
     let _guard = CAPTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     debug!("capturing snapshot");
 
-    let mut child = Command::new("ffmpeg")
-        .args([
+    let output = run_with_timeout(
+        "ffmpeg",
+        &[
             "-nostdin",
             "-loglevel",
             "error",
@@ -57,46 +57,18 @@ pub fn capture_jpeg(rtsp_url: &str) -> Result<Vec<u8>, SnapshotError> {
             "-update",
             "1",
             "-",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(SnapshotError::Unavailable)?;
+        ],
+        SNAPSHOT_TIMEOUT,
+    )
+    .map_err(|e| match e {
+        ProcessError::Unavailable(e) => SnapshotError::Unavailable(e),
+        ProcessError::Timeout => SnapshotError::Timeout,
+    })?;
 
-    // Drain stdout on a helper thread so a large frame cannot deadlock the
-    // pipe while we wait for the process with a timeout.
-    let mut stdout = child.stdout.take().expect("stdout piped");
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        buf
-    });
-
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() >= SNAPSHOT_TIMEOUT => {
-                warn!("ffmpeg snapshot exceeded timeout, killing");
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(SnapshotError::Timeout);
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => return Err(SnapshotError::Unavailable(e)),
-        }
-    };
-
-    let image = reader.join().unwrap_or_default();
-    if !status.success() || image.is_empty() {
-        let mut stderr = String::new();
-        if let Some(mut err) = child.stderr.take() {
-            let _ = err.read_to_string(&mut stderr);
-        }
-        return Err(SnapshotError::Failed(stderr.trim().to_string()));
+    if !output.success || output.stdout.is_empty() {
+        return Err(SnapshotError::Failed(output.stderr));
     }
 
-    debug!(bytes = image.len(), "snapshot captured");
-    Ok(image)
+    debug!(bytes = output.stdout.len(), "snapshot captured");
+    Ok(output.stdout)
 }

@@ -1,9 +1,11 @@
 //! ONVIF SOAP service: HTTP transport, authentication and operation dispatch.
 
 pub mod auth;
+pub mod process;
 pub mod responses;
 pub mod snapshot;
 pub mod soap;
+pub mod stream_info;
 
 use crate::config::Config;
 use crate::identity::DeviceIdentity;
@@ -14,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use stream_info::StreamProbe;
 use tracing::{debug, info, warn};
 
 /// Largest accepted request body. ONVIF requests are a few kilobytes at most.
@@ -31,7 +34,6 @@ const PUBLIC_OPERATIONS: &[&str] = &[
     "GetSystemDateAndTime",
     "GetWsdlUrl",
     "GetHostname",
-    "GetEndpointReference",
 ];
 
 /// A fully built HTTP response, independent of the transport library.
@@ -78,6 +80,7 @@ pub struct OnvifService {
     config: Config,
     identity: DeviceIdentity,
     auth: Authenticator,
+    stream: Arc<StreamProbe>,
 }
 
 impl OnvifService {
@@ -87,11 +90,24 @@ impl OnvifService {
             config,
             identity,
             auth,
+            stream: StreamProbe::new(),
         }
     }
 
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// The stream description used in media responses.
+    pub fn stream(&self) -> &Arc<StreamProbe> {
+        &self.stream
+    }
+
+    /// Starts probing the RTSP stream in the background so that profiles
+    /// report the real codec, resolution and frame rate.
+    pub fn start_stream_probe(&self, stop: Arc<AtomicBool>) {
+        self.stream
+            .start_background_probe(self.config.internal_rtsp_url(), stop);
     }
 
     /// Handles one HTTP request and produces a response. Pure with respect
@@ -161,7 +177,7 @@ impl OnvifService {
             return self.unauthorized(result);
         }
 
-        match snapshot::capture_jpeg(&self.config.rtsp_stream_url) {
+        match snapshot::capture_jpeg(&self.config.internal_rtsp_url()) {
             Ok(image) => OnvifResponse {
                 status: 200,
                 content_type: "image/jpeg".to_string(),
@@ -210,43 +226,129 @@ impl OnvifService {
             }
         }
 
-        let ip = self.config.container_ip.to_string();
-        let ip = ip.as_str();
-        let port = self.config.onvif_port.to_string();
-        let port = port.as_str();
+        match self.dispatch(action, path, &request) {
+            Ok(body) => {
+                debug!(action, "handled operation");
+                OnvifResponse::soap(200, body)
+            }
+            Err(fault) => fault,
+        }
+    }
+
+    /// Produces the SOAP response body for an authenticated (or public)
+    /// operation, or a fault response.
+    fn dispatch(
+        &self,
+        action: &str,
+        path: &str,
+        request: &SoapRequest<'_>,
+    ) -> Result<String, OnvifResponse> {
+        let ip = self.config.container_ip;
+        let port = self.config.onvif_port;
+        let stream = self.stream.current();
+
         let body = match action {
-            "GetCapabilities" => responses::get_capabilities_response(ip, port),
-            "GetServices" => responses::get_services_response(ip, port),
-            "GetServiceCapabilities" => responses::get_service_capabilities_response(),
-            "GetSystemDateAndTime" => responses::get_system_date_time_response(),
-            "GetDeviceInformation" => responses::get_device_info_response(&self.identity),
-            "GetProfiles" => responses::get_profiles_response(),
-            "GetStreamUri" => responses::get_stream_uri_response(&self.config.rtsp_stream_url),
-            "GetSnapshotUri" => responses::get_snapshot_uri_response(ip, port),
-            "GetVideoSources" => responses::get_video_sources_response(),
-            "GetVideoSourceConfigurations" => responses::get_video_source_configurations_response(),
-            "GetVideoEncoderConfigurations" => {
-                responses::get_video_encoder_configurations_response()
+            "GetCapabilities" => responses::capabilities(ip, port),
+            "GetServices" => {
+                let include = request
+                    .action_parameter("IncludeCapability")
+                    .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+                    .unwrap_or(false);
+                responses::services(ip, port, include)
             }
-            "GetAudioSourceConfigurations" => responses::get_audio_source_configurations_response(),
-            "GetAudioEncoderConfigurations" => {
-                responses::get_audio_encoder_configurations_response()
+            "GetServiceCapabilities" => {
+                if path.contains("media") {
+                    responses::media_service_capabilities()
+                } else {
+                    responses::device_service_capabilities()
+                }
             }
+            "GetSystemDateAndTime" => responses::system_date_time(),
+            "GetDeviceInformation" => responses::device_information(&self.identity),
+            "GetHostname" => responses::hostname(&self.identity),
+            "GetScopes" => responses::scopes(&self.identity),
+            "GetWsdlUrl" => responses::wsdl_url(),
+            "GetProfiles" => responses::profiles(&stream),
+            "GetProfile" => {
+                self.check_profile_token(request)?;
+                responses::profile(&stream)
+            }
+            "GetStreamUri" => {
+                self.check_profile_token(request)?;
+                responses::stream_uri(&self.config.rtsp_stream_url)
+            }
+            "GetSnapshotUri" => {
+                self.check_profile_token(request)?;
+                responses::snapshot_uri(ip, port)
+            }
+            "GetVideoSources" => responses::video_sources(&stream),
+            "GetVideoSourceConfigurations" => responses::video_source_configurations(&stream),
+            "GetVideoSourceConfiguration" => {
+                self.check_configuration_token(request, responses::VIDEO_SOURCE_CONFIG_TOKEN)?;
+                responses::video_source_configuration(&stream)
+            }
+            "GetVideoEncoderConfigurations" => responses::video_encoder_configurations(&stream),
+            "GetVideoEncoderConfiguration" => {
+                self.check_configuration_token(request, responses::VIDEO_ENCODER_CONFIG_TOKEN)?;
+                responses::video_encoder_configuration(&stream)
+            }
+            "GetVideoEncoderConfigurationOptions" => {
+                responses::video_encoder_configuration_options(&stream)
+            }
+            "GetAudioSourceConfigurations" => responses::audio_source_configurations(),
+            "GetAudioEncoderConfigurations" => responses::audio_encoder_configurations(),
             other => {
                 info!(action = other, "unsupported ONVIF operation");
-                return OnvifResponse::soap(
+                return Err(OnvifResponse::soap(
                     400,
                     soap_fault(
                         FaultCode::Sender,
                         "ActionNotSupported",
                         &format!("The operation '{other}' is not supported by this device"),
                     ),
-                );
+                ));
             }
         };
+        Ok(body)
+    }
 
-        debug!(action, "handled operation");
-        OnvifResponse::soap(200, body)
+    /// Accepts a missing ProfileToken (lenient clients) or our single token.
+    fn check_profile_token(&self, request: &SoapRequest<'_>) -> Result<(), OnvifResponse> {
+        match request.action_parameter("ProfileToken") {
+            Some(token) if token != responses::PROFILE_TOKEN => {
+                debug!(token, "unknown profile token");
+                Err(OnvifResponse::soap(
+                    400,
+                    soap_fault(
+                        FaultCode::Sender,
+                        "InvalidArgVal",
+                        &format!("The requested profile token '{token}' does not exist"),
+                    ),
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn check_configuration_token(
+        &self,
+        request: &SoapRequest<'_>,
+        expected: &str,
+    ) -> Result<(), OnvifResponse> {
+        match request.action_parameter("ConfigurationToken") {
+            Some(token) if token != expected => {
+                debug!(token, "unknown configuration token");
+                Err(OnvifResponse::soap(
+                    400,
+                    soap_fault(
+                        FaultCode::Sender,
+                        "InvalidArgVal",
+                        &format!("The requested configuration token '{token}' does not exist"),
+                    ),
+                ))
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Binds `addr` and serves requests on `workers` threads until the
@@ -432,6 +534,7 @@ mod tests {
         let r = svc.handle("POST", "/onvif/media_service", Some(&basic()), &body);
         assert_eq!(r.status, 200);
         assert!(r.body_str().contains("rtsp://127.0.0.1:8554/stream"));
+        assert!(r.body_str().contains("<tt:Timeout>PT0S</tt:Timeout>"));
     }
 
     #[test]
@@ -485,6 +588,38 @@ mod tests {
     }
 
     #[test]
+    fn profile_tokens_are_validated() {
+        let svc = service();
+        let ok = envelope(&format!(
+            "<trt:GetStreamUri xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\"><trt:ProfileToken>{}</trt:ProfileToken></trt:GetStreamUri>",
+            responses::PROFILE_TOKEN
+        ));
+        assert_eq!(
+            svc.handle("POST", "/onvif/media_service", Some(&basic()), &ok)
+                .status,
+            200
+        );
+        let bad = envelope("<trt:GetStreamUri xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\"><trt:ProfileToken>Nope</trt:ProfileToken></trt:GetStreamUri>");
+        let r = svc.handle("POST", "/onvif/media_service", Some(&basic()), &bad);
+        assert_eq!(r.status, 400);
+        assert!(r.body_str().contains("ter:InvalidArgVal"));
+    }
+
+    #[test]
+    fn service_capabilities_depend_on_path() {
+        let svc = service();
+        let body = envelope("<GetServiceCapabilities/>");
+        let dev = svc.handle("POST", "/onvif/device_service", None, &body);
+        assert!(dev
+            .body_str()
+            .contains("tds:GetServiceCapabilitiesResponse"));
+        let media = svc.handle("POST", "/onvif/media_service", None, &body);
+        assert!(media
+            .body_str()
+            .contains("trt:GetServiceCapabilitiesResponse"));
+    }
+
+    #[test]
     fn malformed_requests_are_rejected() {
         let svc = service();
         // Unauthenticated malformed/empty bodies receive a Digest challenge so
@@ -527,12 +662,19 @@ mod tests {
             "GetServiceCapabilities",
             "GetSystemDateAndTime",
             "GetDeviceInformation",
+            "GetHostname",
+            "GetScopes",
+            "GetWsdlUrl",
             "GetProfiles",
+            "GetProfile",
             "GetStreamUri",
             "GetSnapshotUri",
             "GetVideoSources",
             "GetVideoSourceConfigurations",
+            "GetVideoSourceConfiguration",
             "GetVideoEncoderConfigurations",
+            "GetVideoEncoderConfiguration",
+            "GetVideoEncoderConfigurationOptions",
             "GetAudioSourceConfigurations",
             "GetAudioEncoderConfigurations",
         ] {

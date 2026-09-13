@@ -1,16 +1,54 @@
-// ONVIF Response Templates
-// This module contains all the hardcoded ONVIF SOAP responses
+//! ONVIF SOAP response bodies.
+//!
+//! Every function returns a complete SOAP envelope. Dynamic values are
+//! escaped; namespaces are declared once on the envelope.
 
 use crate::identity::DeviceIdentity;
 use crate::onvif::soap::{xml_escape, SoapResponseBuilder};
+use crate::onvif::stream_info::{StreamInfo, VideoEncoding};
 use chrono::{Datelike, Timelike};
+use std::net::Ipv4Addr;
 
-pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String {
-    let body_content = format!(
-        r#"<tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+pub const DEVICE_NS: &str = "http://www.onvif.org/ver10/device/wsdl";
+pub const MEDIA_NS: &str = "http://www.onvif.org/ver10/media/wsdl";
+pub const SCHEMA_NS: &str = "http://www.onvif.org/ver10/schema";
+
+/// Token of the single media profile this device exposes.
+pub const PROFILE_TOKEN: &str = "Profile_1";
+pub const PROFILE_NAME: &str = "MainStream";
+pub const VIDEO_SOURCE_TOKEN: &str = "VideoSource_1";
+pub const VIDEO_SOURCE_CONFIG_TOKEN: &str = "VideoSourceConfig_1";
+pub const VIDEO_ENCODER_CONFIG_TOKEN: &str = "VideoEncoderConfig_1";
+
+/// ONVIF version advertised in capabilities.
+const ONVIF_MAJOR: u32 = 2;
+const ONVIF_MINOR: u32 = 60;
+
+fn device_envelope(body: &str) -> String {
+    SoapResponseBuilder::new()
+        .add_namespace("tds", DEVICE_NS)
+        .add_namespace("tt", SCHEMA_NS)
+        .set_body(body)
+        .build()
+}
+
+fn media_envelope(body: &str) -> String {
+    SoapResponseBuilder::new()
+        .add_namespace("trt", MEDIA_NS)
+        .add_namespace("tt", SCHEMA_NS)
+        .set_body(body)
+        .build()
+}
+
+/// `GetCapabilitiesResponse` (legacy capability discovery).
+pub fn capabilities(ip: Ipv4Addr, port: u16) -> String {
+    let device_url = DeviceIdentity::device_service_url(ip, port);
+    let media_url = DeviceIdentity::media_service_url(ip, port);
+    device_envelope(&format!(
+        "<tds:GetCapabilitiesResponse>
 <tds:Capabilities>
-<tt:Device xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
+<tt:Device>
+<tt:XAddr>{device_url}</tt:XAddr>
 <tt:Network>
 <tt:IPFilter>false</tt:IPFilter>
 <tt:ZeroConfiguration>false</tt:ZeroConfiguration>
@@ -19,14 +57,14 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 </tt:Network>
 <tt:System>
 <tt:DiscoveryResolve>false</tt:DiscoveryResolve>
-<tt:DiscoveryBye>false</tt:DiscoveryBye>
+<tt:DiscoveryBye>true</tt:DiscoveryBye>
 <tt:RemoteDiscovery>false</tt:RemoteDiscovery>
 <tt:SystemBackup>false</tt:SystemBackup>
 <tt:SystemLogging>false</tt:SystemLogging>
 <tt:FirmwareUpgrade>false</tt:FirmwareUpgrade>
 <tt:SupportedVersions>
-<tt:Major>2</tt:Major>
-<tt:Minor>60</tt:Minor>
+<tt:Major>{ONVIF_MAJOR}</tt:Major>
+<tt:Minor>{ONVIF_MINOR}</tt:Minor>
 </tt:SupportedVersions>
 </tt:System>
 <tt:IO>
@@ -42,14 +80,10 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 <tt:SAMLToken>false</tt:SAMLToken>
 <tt:KerberosToken>false</tt:KerberosToken>
 <tt:RELToken>false</tt:RELToken>
-<tt:UsernameToken>true</tt:UsernameToken>
-<tt:HttpDigest>true</tt:HttpDigest>
-<tt:WSUsernameToken>true</tt:WSUsernameToken>
-<tt:WSSecurityDuration>5</tt:WSSecurityDuration>
 </tt:Security>
 </tt:Device>
-<tt:Media xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tt:XAddr>
+<tt:Media>
+<tt:XAddr>{media_url}</tt:XAddr>
 <tt:StreamingCapabilities>
 <tt:RTPMulticast>false</tt:RTPMulticast>
 <tt:RTP_TCP>true</tt:RTP_TCP>
@@ -57,398 +91,573 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 </tt:StreamingCapabilities>
 </tt:Media>
 </tds:Capabilities>
-</tds:GetCapabilitiesResponse>"#
-    );
-
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(&body_content)
-        .build()
+</tds:GetCapabilitiesResponse>"
+    ))
 }
 
-pub fn get_services_response(container_ip: &str, onvif_port: &str) -> String {
-    let body_content = format!(
-        r#"<tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+/// `GetServicesResponse` listing the device and media services.
+pub fn services(ip: Ipv4Addr, port: u16, include_capability: bool) -> String {
+    let device_url = DeviceIdentity::device_service_url(ip, port);
+    let media_url = DeviceIdentity::media_service_url(ip, port);
+    let device_caps = if include_capability {
+        format!(
+            "<tds:Capabilities>\n{}\n</tds:Capabilities>\n",
+            device_service_capabilities_element()
+        )
+    } else {
+        String::new()
+    };
+    let media_caps = if include_capability {
+        format!(
+            "<tds:Capabilities>\n{}\n</tds:Capabilities>\n",
+            media_service_capabilities_element()
+        )
+    } else {
+        String::new()
+    };
+    device_envelope(&format!(
+        "<tds:GetServicesResponse>
 <tds:Service>
-<tds:Namespace>http://www.onvif.org/ver10/device/wsdl</tds:Namespace>
-<tds:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tds:XAddr>
-<tds:Capabilities>
-<tds:Network>
-<tds:IPFilter>false</tds:IPFilter>
-<tds:ZeroConfiguration>false</tds:ZeroConfiguration>
-<tds:IPVersion6>false</tds:IPVersion6>
-<tds:DynDNS>false</tds:DynDNS>
-</tds:Network>
-<tds:System>
-<tds:DiscoveryResolve>false</tds:DiscoveryResolve>
-<tds:DiscoveryBye>false</tds:DiscoveryBye>
-<tds:RemoteDiscovery>false</tds:RemoteDiscovery>
-<tds:SystemBackup>false</tds:SystemBackup>
-<tds:SystemLogging>false</tds:SystemLogging>
-<tds:FirmwareUpgrade>false</tds:FirmwareUpgrade>
-<tds:SupportedVersions>
-<tds:Major>2</tds:Major>
-<tds:Minor>60</tds:Minor>
-</tds:SupportedVersions>
-</tds:System>
-<tds:IO>
-<tds:InputConnectors>0</tds:InputConnectors>
-<tds:RelayOutputs>0</tds:RelayOutputs>
-</tds:IO>
-<tds:Security>
-<tds:TLS1.1>false</tds:TLS1.1>
-<tds:TLS1.2>false</tds:TLS1.2>
-<tds:OnboardKeyGeneration>false</tds:OnboardKeyGeneration>
-<tds:AccessPolicyConfig>false</tds:AccessPolicyConfig>
-<tds:X.509Token>false</tds:X.509Token>
-<tds:SAMLToken>false</tds:SAMLToken>
-<tds:KerberosToken>false</tds:KerberosToken>
-<tds:RELToken>false</tds:RELToken>
-</tds:Security>
-</tds:Capabilities>
-<tds:Version>
-<tds:Major>2</tds:Major>
-<tds:Minor>60</tds:Minor>
+<tds:Namespace>{DEVICE_NS}</tds:Namespace>
+<tds:XAddr>{device_url}</tds:XAddr>
+{device_caps}<tds:Version>
+<tt:Major>{ONVIF_MAJOR}</tt:Major>
+<tt:Minor>{ONVIF_MINOR}</tt:Minor>
 </tds:Version>
 </tds:Service>
 <tds:Service>
-<tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace>
-<tds:XAddr>http://{container_ip}:{onvif_port}/onvif/device_service</tds:XAddr>
-<tds:Capabilities>
-<tds:StreamingCapabilities>
-<tds:RTPMulticast>false</tds:RTPMulticast>
-<tds:RTP_TCP>true</tds:RTP_TCP>
-<tds:RTP_RTSP_TCP>true</tds:RTP_RTSP_TCP>
-</tds:StreamingCapabilities>
-</tds:Capabilities>
-<tds:Version>
-<tds:Major>2</tds:Major>
-<tds:Minor>60</tds:Minor>
+<tds:Namespace>{MEDIA_NS}</tds:Namespace>
+<tds:XAddr>{media_url}</tds:XAddr>
+{media_caps}<tds:Version>
+<tt:Major>{ONVIF_MAJOR}</tt:Major>
+<tt:Minor>{ONVIF_MINOR}</tt:Minor>
 </tds:Version>
 </tds:Service>
-</tds:GetServicesResponse>"#
-    );
-
-    SoapResponseBuilder::new().set_body(&body_content).build()
+</tds:GetServicesResponse>"
+    ))
 }
 
-pub fn get_profiles_response() -> String {
-    let body_content = r#"<trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Profiles token="HQProfile" fixed="true">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">HQProfile</tt:Name>
-<tt:VideoSourceConfiguration token="VideoSourceConfig_HQ">
-<tt:Name>VideoSourceConfig_HQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="960" height="540"/>
-</tt:VideoSourceConfiguration>
-<tt:VideoEncoderConfiguration token="VideoEncoderConfig_HQ">
-<tt:Name>VideoEncoderConfig_HQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:Encoding>H264</tt:Encoding>
-<tt:Resolution>
-<tt:Width>960</tt:Width>
-<tt:Height>540</tt:Height>
-</tt:Resolution>
-<tt:Quality>4</tt:Quality>
-<tt:RateControl>
-<tt:FrameRateLimit>15</tt:FrameRateLimit>
-<tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>1500</tt:BitrateLimit>
-</tt:RateControl>
-<tt:H264>
-<tt:GovLength>15</tt:GovLength>
-<tt:H264Profile>Main</tt:H264Profile>
-<tt:Level>4.1</tt:Level>
-</tt:H264>
-<tt:Multicast>
-<tt:Address>
-<tt:Type>IPv4</tt:Type>
-<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
-</tt:Address>
-<tt:Port>0</tt:Port>
-<tt:TTL>1</tt:TTL>
-<tt:AutoStart>false</tt:AutoStart>
-</tt:Multicast>
-<tt:SessionTimeout>PT60S</tt:SessionTimeout>
-</tt:VideoEncoderConfiguration>
-</trt:Profiles>
-<trt:Profiles token="LQProfile" fixed="true">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">LQProfile</tt:Name>
-<tt:VideoSourceConfiguration token="VideoSourceConfig_LQ">
-<tt:Name>VideoSourceConfig_LQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="960" height="540"/>
-</tt:VideoSourceConfiguration>
-<tt:VideoEncoderConfiguration token="VideoEncoderConfig_LQ">
-<tt:Name>VideoEncoderConfig_LQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:Encoding>H264</tt:Encoding>
-<tt:Resolution>
-<tt:Width>960</tt:Width>
-<tt:Height>540</tt:Height>
-</tt:Resolution>
-<tt:Quality>4</tt:Quality>
-<tt:RateControl>
-<tt:FrameRateLimit>15</tt:FrameRateLimit>
-<tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>1500</tt:BitrateLimit>
-</tt:RateControl>
-<tt:H264>
-<tt:GovLength>15</tt:GovLength>
-<tt:H264Profile>Baseline</tt:H264Profile>
-<tt:Level>3.1</tt:Level>
-</tt:H264>
-<tt:Multicast>
-<tt:Address>
-<tt:Type>IPv4</tt:Type>
-<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
-</tt:Address>
-<tt:Port>0</tt:Port>
-<tt:TTL>1</tt:TTL>
-<tt:AutoStart>false</tt:AutoStart>
-</tt:Multicast>
-<tt:SessionTimeout>PT60S</tt:SessionTimeout>
-</tt:VideoEncoderConfiguration>
-</trt:Profiles>
-</trt:GetProfilesResponse>"#;
-
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(body_content)
-        .build()
+fn device_service_capabilities_element() -> String {
+    format!(
+        "<tds:Capabilities xmlns:tds=\"{DEVICE_NS}\">
+<tds:Network IPFilter=\"false\" ZeroConfiguration=\"false\" IPVersion6=\"false\" DynDNS=\"false\" Dot11Configuration=\"false\" HostnameFromDHCP=\"false\" NTP=\"0\" DHCPv6=\"false\"/>
+<tds:Security TLS1.0=\"false\" TLS1.1=\"false\" TLS1.2=\"false\" OnboardKeyGeneration=\"false\" AccessPolicyConfig=\"false\" DefaultAccessPolicy=\"false\" Dot1X=\"false\" RemoteUserHandling=\"false\" X.509Token=\"false\" SAMLToken=\"false\" KerberosToken=\"false\" UsernameToken=\"true\" HttpDigest=\"true\" RELToken=\"false\"/>
+<tds:System DiscoveryResolve=\"false\" DiscoveryBye=\"true\" RemoteDiscovery=\"false\" SystemBackup=\"false\" SystemLogging=\"false\" FirmwareUpgrade=\"false\" HttpFirmwareUpgrade=\"false\" HttpSystemBackup=\"false\" HttpSystemLogging=\"false\" HttpSupportInformation=\"false\" StorageConfiguration=\"false\"/>
+</tds:Capabilities>"
+    )
 }
 
-pub fn get_stream_uri_response(rtsp_stream: &str) -> String {
-    let body_content = format!(
-        r#"<trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:MediaUri>
-<tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">{rtsp_stream}</tt:Uri>
-</trt:MediaUri>
-</trt:GetStreamUriResponse>"#
-    );
-
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(&body_content)
-        .build()
+fn media_service_capabilities_element() -> String {
+    format!(
+        "<trt:Capabilities xmlns:trt=\"{MEDIA_NS}\" SnapshotUri=\"true\" Rotation=\"false\" VideoSourceMode=\"false\" OSD=\"false\" TemporaryOSDText=\"false\" EXICompression=\"false\">
+<trt:ProfileCapabilities MaximumNumberOfProfiles=\"1\"/>
+<trt:StreamingCapabilities RTPMulticast=\"false\" RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\" NoRTSPStreaming=\"false\"/>
+</trt:Capabilities>"
+    )
 }
 
-pub fn get_device_info_response(identity: &DeviceIdentity) -> String {
-    let body_content = format!(
-        r#"<tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+/// Device service `GetServiceCapabilitiesResponse`.
+pub fn device_service_capabilities() -> String {
+    device_envelope(&format!(
+        "<tds:GetServiceCapabilitiesResponse>\n{}\n</tds:GetServiceCapabilitiesResponse>",
+        device_service_capabilities_element()
+    ))
+}
+
+/// Media service `GetServiceCapabilitiesResponse`.
+pub fn media_service_capabilities() -> String {
+    media_envelope(&format!(
+        "<trt:GetServiceCapabilitiesResponse>\n{}\n</trt:GetServiceCapabilitiesResponse>",
+        media_service_capabilities_element()
+    ))
+}
+
+/// `GetSystemDateAndTimeResponse` with the current UTC time.
+pub fn system_date_time() -> String {
+    let now = chrono::Utc::now();
+    device_envelope(&format!(
+        "<tds:GetSystemDateAndTimeResponse>
+<tds:SystemDateAndTime>
+<tt:DateTimeType>NTP</tt:DateTimeType>
+<tt:DaylightSavings>false</tt:DaylightSavings>
+<tt:TimeZone>
+<tt:TZ>UTC0</tt:TZ>
+</tt:TimeZone>
+<tt:UTCDateTime>
+<tt:Time>
+<tt:Hour>{h}</tt:Hour>
+<tt:Minute>{mi}</tt:Minute>
+<tt:Second>{s}</tt:Second>
+</tt:Time>
+<tt:Date>
+<tt:Year>{y}</tt:Year>
+<tt:Month>{mo}</tt:Month>
+<tt:Day>{d}</tt:Day>
+</tt:Date>
+</tt:UTCDateTime>
+<tt:LocalDateTime>
+<tt:Time>
+<tt:Hour>{h}</tt:Hour>
+<tt:Minute>{mi}</tt:Minute>
+<tt:Second>{s}</tt:Second>
+</tt:Time>
+<tt:Date>
+<tt:Year>{y}</tt:Year>
+<tt:Month>{mo}</tt:Month>
+<tt:Day>{d}</tt:Day>
+</tt:Date>
+</tt:LocalDateTime>
+</tds:SystemDateAndTime>
+</tds:GetSystemDateAndTimeResponse>",
+        h = now.hour(),
+        mi = now.minute(),
+        s = now.second(),
+        y = now.year(),
+        mo = now.month(),
+        d = now.day()
+    ))
+}
+
+/// `GetDeviceInformationResponse`.
+pub fn device_information(identity: &DeviceIdentity) -> String {
+    device_envelope(&format!(
+        "<tds:GetDeviceInformationResponse>
 <tds:Manufacturer>{}</tds:Manufacturer>
 <tds:Model>{}</tds:Model>
 <tds:FirmwareVersion>{}</tds:FirmwareVersion>
 <tds:SerialNumber>{}</tds:SerialNumber>
 <tds:HardwareId>{}</tds:HardwareId>
-</tds:GetDeviceInformationResponse>"#,
+</tds:GetDeviceInformationResponse>",
         xml_escape(identity.manufacturer()),
         xml_escape(&identity.name),
         xml_escape(&identity.firmware_version),
         xml_escape(&identity.serial_number),
         xml_escape(identity.hardware_id())
-    );
-
-    SoapResponseBuilder::new().set_body(&body_content).build()
+    ))
 }
 
-pub fn get_video_sources_response() -> String {
-    let body_content = r#"<trt:GetVideoSourcesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:VideoSources token="VideoSource_1">
-<tt:Framerate xmlns:tt="http://www.onvif.org/ver10/schema">15</tt:Framerate>
-<tt:Resolution xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:Width>960</tt:Width>
-<tt:Height>540</tt:Height>
+/// `GetHostnameResponse`.
+pub fn hostname(identity: &DeviceIdentity) -> String {
+    let name: String = identity
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    device_envelope(&format!(
+        "<tds:GetHostnameResponse>
+<tds:HostnameInformation>
+<tt:FromDHCP>false</tt:FromDHCP>
+<tt:Name>{}</tt:Name>
+</tds:HostnameInformation>
+</tds:GetHostnameResponse>",
+        xml_escape(name.trim_matches('-'))
+    ))
+}
+
+/// `GetScopesResponse` mirroring the discovery scopes.
+pub fn scopes(identity: &DeviceIdentity) -> String {
+    let items: String = identity
+        .scopes()
+        .split_whitespace()
+        .map(|scope| {
+            format!(
+                "<tds:Scopes>\n<tt:ScopeDef>Fixed</tt:ScopeDef>\n<tt:ScopeItem>{}</tt:ScopeItem>\n</tds:Scopes>\n",
+                xml_escape(scope)
+            )
+        })
+        .collect();
+    device_envelope(&format!(
+        "<tds:GetScopesResponse>\n{items}</tds:GetScopesResponse>"
+    ))
+}
+
+/// `GetWsdlUrlResponse`.
+pub fn wsdl_url() -> String {
+    device_envelope(
+        "<tds:GetWsdlUrlResponse>\n<tds:WsdlUrl>http://www.onvif.org/</tds:WsdlUrl>\n</tds:GetWsdlUrlResponse>",
+    )
+}
+
+fn video_source_configuration_element(stream: &StreamInfo) -> String {
+    format!(
+        "<tt:Name>{VIDEO_SOURCE_CONFIG_TOKEN}</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:SourceToken>{VIDEO_SOURCE_TOKEN}</tt:SourceToken>
+<tt:Bounds x=\"0\" y=\"0\" width=\"{}\" height=\"{}\"/>",
+        stream.width, stream.height
+    )
+}
+
+fn video_encoder_configuration_element(stream: &StreamInfo) -> String {
+    let codec_block = match (stream.encoding, &stream.h264_profile) {
+        (VideoEncoding::H264, Some(profile)) => format!(
+            "<tt:H264>\n<tt:GovLength>{}</tt:GovLength>\n<tt:H264Profile>{}</tt:H264Profile>\n</tt:H264>\n",
+            stream.framerate.max(1),
+            xml_escape(profile)
+        ),
+        (VideoEncoding::H264, None) => format!(
+            "<tt:H264>\n<tt:GovLength>{}</tt:GovLength>\n<tt:H264Profile>Main</tt:H264Profile>\n</tt:H264>\n",
+            stream.framerate.max(1)
+        ),
+        _ => String::new(),
+    };
+    format!(
+        "<tt:Name>{VIDEO_ENCODER_CONFIG_TOKEN}</tt:Name>
+<tt:UseCount>1</tt:UseCount>
+<tt:Encoding>{}</tt:Encoding>
+<tt:Resolution>
+<tt:Width>{}</tt:Width>
+<tt:Height>{}</tt:Height>
+</tt:Resolution>
+<tt:Quality>5</tt:Quality>
+<tt:RateControl>
+<tt:FrameRateLimit>{}</tt:FrameRateLimit>
+<tt:EncodingInterval>1</tt:EncodingInterval>
+<tt:BitrateLimit>{}</tt:BitrateLimit>
+</tt:RateControl>
+{codec_block}<tt:Multicast>
+<tt:Address>
+<tt:Type>IPv4</tt:Type>
+<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
+</tt:Address>
+<tt:Port>0</tt:Port>
+<tt:TTL>1</tt:TTL>
+<tt:AutoStart>false</tt:AutoStart>
+</tt:Multicast>
+<tt:SessionTimeout>PT60S</tt:SessionTimeout>",
+        stream.encoding.as_onvif(),
+        stream.width,
+        stream.height,
+        stream.framerate,
+        stream.bitrate_kbps
+    )
+}
+
+/// `GetProfilesResponse` with the single fixed profile.
+pub fn profiles(stream: &StreamInfo) -> String {
+    media_envelope(&format!(
+        "<trt:GetProfilesResponse>\n{}\n</trt:GetProfilesResponse>",
+        profile_element("trt:Profiles", stream)
+    ))
+}
+
+/// `GetProfileResponse` for the single fixed profile.
+pub fn profile(stream: &StreamInfo) -> String {
+    media_envelope(&format!(
+        "<trt:GetProfileResponse>\n{}\n</trt:GetProfileResponse>",
+        profile_element("trt:Profile", stream)
+    ))
+}
+
+fn profile_element(tag: &str, stream: &StreamInfo) -> String {
+    format!(
+        "<{tag} token=\"{PROFILE_TOKEN}\" fixed=\"true\">
+<tt:Name>{PROFILE_NAME}</tt:Name>
+<tt:VideoSourceConfiguration token=\"{VIDEO_SOURCE_CONFIG_TOKEN}\">
+{}
+</tt:VideoSourceConfiguration>
+<tt:VideoEncoderConfiguration token=\"{VIDEO_ENCODER_CONFIG_TOKEN}\">
+{}
+</tt:VideoEncoderConfiguration>
+</{tag}>",
+        video_source_configuration_element(stream),
+        video_encoder_configuration_element(stream)
+    )
+}
+
+fn media_uri(uri: &str) -> String {
+    format!(
+        "<trt:MediaUri>
+<tt:Uri>{}</tt:Uri>
+<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>
+<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>
+<tt:Timeout>PT0S</tt:Timeout>
+</trt:MediaUri>",
+        xml_escape(uri)
+    )
+}
+
+/// `GetStreamUriResponse`.
+pub fn stream_uri(rtsp_url: &str) -> String {
+    media_envelope(&format!(
+        "<trt:GetStreamUriResponse>\n{}\n</trt:GetStreamUriResponse>",
+        media_uri(rtsp_url)
+    ))
+}
+
+/// `GetSnapshotUriResponse`.
+pub fn snapshot_uri(ip: Ipv4Addr, port: u16) -> String {
+    media_envelope(&format!(
+        "<trt:GetSnapshotUriResponse>\n{}\n</trt:GetSnapshotUriResponse>",
+        media_uri(&DeviceIdentity::snapshot_url(ip, port))
+    ))
+}
+
+/// `GetVideoSourcesResponse`.
+pub fn video_sources(stream: &StreamInfo) -> String {
+    media_envelope(&format!(
+        "<trt:GetVideoSourcesResponse>
+<trt:VideoSources token=\"{VIDEO_SOURCE_TOKEN}\">
+<tt:Framerate>{}</tt:Framerate>
+<tt:Resolution>
+<tt:Width>{}</tt:Width>
+<tt:Height>{}</tt:Height>
 </tt:Resolution>
 </trt:VideoSources>
-</trt:GetVideoSourcesResponse>"#;
-
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(body_content)
-        .build()
+</trt:GetVideoSourcesResponse>",
+        stream.framerate, stream.width, stream.height
+    ))
 }
 
-pub fn get_service_capabilities_response() -> String {
-    let body_content = r#"<trt:GetServiceCapabilitiesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Capabilities>
-<tt:ProfileCapabilities xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:MaximumNumberOfProfiles>2</tt:MaximumNumberOfProfiles>
-</tt:ProfileCapabilities>
-<tt:StreamingCapabilities xmlns:tt="http://www.onvif.org/ver10/schema">
-<tt:RTPMulticast>false</tt:RTPMulticast>
-<tt:RTP_TCP>true</tt:RTP_TCP>
-<tt:RTP_RTSP_TCP>true</tt:RTP_RTSP_TCP>
-</tt:StreamingCapabilities>
-</trt:Capabilities>
-</trt:GetServiceCapabilitiesResponse>"#;
-
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(body_content)
-        .build()
-}
-
-pub fn get_video_source_configurations_response() -> String {
-    let body_content = r#"<trt:GetVideoSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Configurations token="VideoSourceConfig_HQ">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig_HQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="960" height="540"/>
+/// `GetVideoSourceConfigurationsResponse`.
+pub fn video_source_configurations(stream: &StreamInfo) -> String {
+    media_envelope(&format!(
+        "<trt:GetVideoSourceConfigurationsResponse>
+<trt:Configurations token=\"{VIDEO_SOURCE_CONFIG_TOKEN}\">
+{}
 </trt:Configurations>
-<trt:Configurations token="VideoSourceConfig_LQ">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoSourceConfig_LQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:SourceToken>VideoSource_1</tt:SourceToken>
-<tt:Bounds x="0" y="0" width="960" height="540"/>
-</trt:Configurations>
-</trt:GetVideoSourceConfigurationsResponse>"#;
-
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(body_content)
-        .build()
+</trt:GetVideoSourceConfigurationsResponse>",
+        video_source_configuration_element(stream)
+    ))
 }
 
-pub fn get_video_encoder_configurations_response() -> String {
-    let body_content = r#"<trt:GetVideoEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:Configurations token="VideoEncoderConfig_HQ">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoEncoderConfig_HQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:Encoding>H264</tt:Encoding>
-<tt:Resolution>
-<tt:Width>960</tt:Width>
-<tt:Height>540</tt:Height>
-</tt:Resolution>
-<tt:Quality>4</tt:Quality>
-<tt:RateControl>
-<tt:FrameRateLimit>15</tt:FrameRateLimit>
-<tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>1500</tt:BitrateLimit>
-</tt:RateControl>
+/// `GetVideoSourceConfigurationResponse`.
+pub fn video_source_configuration(stream: &StreamInfo) -> String {
+    media_envelope(&format!(
+        "<trt:GetVideoSourceConfigurationResponse>
+<trt:Configuration token=\"{VIDEO_SOURCE_CONFIG_TOKEN}\">
+{}
+</trt:Configuration>
+</trt:GetVideoSourceConfigurationResponse>",
+        video_source_configuration_element(stream)
+    ))
+}
+
+/// `GetVideoEncoderConfigurationsResponse`.
+pub fn video_encoder_configurations(stream: &StreamInfo) -> String {
+    media_envelope(&format!(
+        "<trt:GetVideoEncoderConfigurationsResponse>
+<trt:Configurations token=\"{VIDEO_ENCODER_CONFIG_TOKEN}\">
+{}
+</trt:Configurations>
+</trt:GetVideoEncoderConfigurationsResponse>",
+        video_encoder_configuration_element(stream)
+    ))
+}
+
+/// `GetVideoEncoderConfigurationResponse`.
+pub fn video_encoder_configuration(stream: &StreamInfo) -> String {
+    media_envelope(&format!(
+        "<trt:GetVideoEncoderConfigurationResponse>
+<trt:Configuration token=\"{VIDEO_ENCODER_CONFIG_TOKEN}\">
+{}
+</trt:Configuration>
+</trt:GetVideoEncoderConfigurationResponse>",
+        video_encoder_configuration_element(stream)
+    ))
+}
+
+/// `GetVideoEncoderConfigurationOptionsResponse` describing the fixed stream.
+pub fn video_encoder_configuration_options(stream: &StreamInfo) -> String {
+    let codec_options = match stream.encoding {
+        VideoEncoding::H264 => format!(
+            "<tt:H264>
+<tt:ResolutionsAvailable>
+<tt:Width>{w}</tt:Width>
+<tt:Height>{h}</tt:Height>
+</tt:ResolutionsAvailable>
+<tt:GovLengthRange>
+<tt:Min>1</tt:Min>
+<tt:Max>{fps}</tt:Max>
+</tt:GovLengthRange>
+<tt:FrameRateRange>
+<tt:Min>1</tt:Min>
+<tt:Max>{fps}</tt:Max>
+</tt:FrameRateRange>
+<tt:EncodingIntervalRange>
+<tt:Min>1</tt:Min>
+<tt:Max>1</tt:Max>
+</tt:EncodingIntervalRange>
+<tt:H264ProfilesSupported>{profile}</tt:H264ProfilesSupported>
+</tt:H264>\n",
+            w = stream.width,
+            h = stream.height,
+            fps = stream.framerate.max(1),
+            profile = xml_escape(stream.h264_profile.as_deref().unwrap_or("Main"))
+        ),
+        _ => String::new(),
+    };
+    media_envelope(&format!(
+        "<trt:GetVideoEncoderConfigurationOptionsResponse>
+<trt:Options>
+<tt:QualityRange>
+<tt:Min>1</tt:Min>
+<tt:Max>5</tt:Max>
+</tt:QualityRange>
+{codec_options}<tt:Extension>
 <tt:H264>
-<tt:GovLength>15</tt:GovLength>
-<tt:H264Profile>Main</tt:H264Profile>
-<tt:Level>4.1</tt:Level>
+<tt:BitrateRange>
+<tt:Min>{kbps}</tt:Min>
+<tt:Max>{kbps}</tt:Max>
+</tt:BitrateRange>
 </tt:H264>
-<tt:Multicast>
-<tt:Address>
-<tt:Type>IPv4</tt:Type>
-<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
-</tt:Address>
-<tt:Port>0</tt:Port>
-<tt:TTL>1</tt:TTL>
-<tt:AutoStart>false</tt:AutoStart>
-</tt:Multicast>
-<tt:SessionTimeout>PT60S</tt:SessionTimeout>
-</trt:Configurations>
-<trt:Configurations token="VideoEncoderConfig_LQ">
-<tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">VideoEncoderConfig_LQ</tt:Name>
-<tt:UseCount>1</tt:UseCount>
-<tt:Encoding>H264</tt:Encoding>
-<tt:Resolution>
-<tt:Width>960</tt:Width>
-<tt:Height>540</tt:Height>
-</tt:Resolution>
-<tt:Quality>4</tt:Quality>
-<tt:RateControl>
-<tt:FrameRateLimit>15</tt:FrameRateLimit>
-<tt:EncodingInterval>1</tt:EncodingInterval>
-<tt:BitrateLimit>1500</tt:BitrateLimit>
-</tt:RateControl>
-<tt:H264>
-<tt:GovLength>15</tt:GovLength>
-<tt:H264Profile>Main</tt:H264Profile>
-<tt:Level>4.1</tt:Level>
-</tt:H264>
-<tt:Multicast>
-<tt:Address>
-<tt:Type>IPv4</tt:Type>
-<tt:IPv4Address>0.0.0.0</tt:IPv4Address>
-</tt:Address>
-<tt:Port>0</tt:Port>
-<tt:TTL>1</tt:TTL>
-<tt:AutoStart>false</tt:AutoStart>
-</tt:Multicast>
-<tt:SessionTimeout>PT60S</tt:SessionTimeout>
-</trt:Configurations>
-</trt:GetVideoEncoderConfigurationsResponse>"#;
-
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(body_content)
-        .build()
+</tt:Extension>
+</trt:Options>
+</trt:GetVideoEncoderConfigurationOptionsResponse>",
+        kbps = stream.bitrate_kbps
+    ))
 }
 
-pub fn get_audio_source_configurations_response() -> String {
-    let body_content = r#"<trt:GetAudioSourceConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-</trt:GetAudioSourceConfigurationsResponse>"#;
-
-    SoapResponseBuilder::new().set_body(body_content).build()
+/// `GetAudioSourceConfigurationsResponse` (no audio is exposed).
+pub fn audio_source_configurations() -> String {
+    media_envelope("<trt:GetAudioSourceConfigurationsResponse/>")
 }
 
-pub fn get_audio_encoder_configurations_response() -> String {
-    let body_content = r#"<trt:GetAudioEncoderConfigurationsResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-</trt:GetAudioEncoderConfigurationsResponse>"#;
-
-    SoapResponseBuilder::new().set_body(body_content).build()
+/// `GetAudioEncoderConfigurationsResponse` (no audio is exposed).
+pub fn audio_encoder_configurations() -> String {
+    media_envelope("<trt:GetAudioEncoderConfigurationsResponse/>")
 }
 
-pub fn get_snapshot_uri_response(container_ip: &str, onvif_port: &str) -> String {
-    let body_content = format!(
-        r#"<trt:GetSnapshotUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
-<trt:MediaUri>
-<tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">http://{container_ip}:{onvif_port}/snapshot.jpg</tt:Uri>
-</trt:MediaUri>
-</trt:GetSnapshotUriResponse>"#
-    );
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use roxmltree::Document;
 
-    SoapResponseBuilder::new()
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(&body_content)
-        .build()
-}
+    fn ip() -> Ipv4Addr {
+        Ipv4Addr::new(192, 0, 2, 10)
+    }
 
-pub fn get_system_date_time_response() -> String {
-    // Get current UTC time
-    let now = chrono::Utc::now();
+    fn identity() -> DeviceIdentity {
+        DeviceIdentity::new("Test <Cam> & Co")
+    }
 
-    let body_content = format!(
-        r#"<tds:GetSystemDateAndTimeResponse>
-<tds:SystemDateAndTime>
-<tt:DateTimeType>NTP</tt:DateTimeType>
-<tt:DaylightSavings>false</tt:DaylightSavings>
-<tt:TimeZone>
-<tt:TZ>UTC</tt:TZ>
-</tt:TimeZone>
-<tt:UTCDateTime>
-<tt:Time>
-<tt:Hour>{}</tt:Hour>
-<tt:Minute>{}</tt:Minute>
-<tt:Second>{}</tt:Second>
-</tt:Time>
-<tt:Date>
-<tt:Year>{}</tt:Year>
-<tt:Month>{}</tt:Month>
-<tt:Day>{}</tt:Day>
-</tt:Date>
-</tt:UTCDateTime>
-</tds:SystemDateAndTime>
-</tds:GetSystemDateAndTimeResponse>"#,
-        now.hour(),
-        now.minute(),
-        now.second(),
-        now.year(),
-        now.month(),
-        now.day()
-    );
+    fn parse(xml: &str) -> Document<'_> {
+        Document::parse(xml).unwrap_or_else(|e| panic!("{e}\n{xml}"))
+    }
 
-    SoapResponseBuilder::new()
-        .add_namespace("tds", "http://www.onvif.org/ver10/device/wsdl")
-        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
-        .set_body(&body_content)
-        .build()
+    fn text_of<'a>(doc: &'a Document<'a>, name: &str) -> Option<&'a str> {
+        doc.descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == name)
+            .and_then(|n| n.text())
+    }
+
+    #[test]
+    fn every_response_is_well_formed() {
+        let stream = StreamInfo::default();
+        let id = identity();
+        let all = [
+            capabilities(ip(), 8080),
+            services(ip(), 8080, true),
+            services(ip(), 8080, false),
+            device_service_capabilities(),
+            media_service_capabilities(),
+            system_date_time(),
+            device_information(&id),
+            hostname(&id),
+            scopes(&id),
+            wsdl_url(),
+            profiles(&stream),
+            profile(&stream),
+            stream_uri("rtsp://192.0.2.10:8554/stream"),
+            snapshot_uri(ip(), 8080),
+            video_sources(&stream),
+            video_source_configurations(&stream),
+            video_source_configuration(&stream),
+            video_encoder_configurations(&stream),
+            video_encoder_configuration(&stream),
+            video_encoder_configuration_options(&stream),
+            audio_source_configurations(),
+            audio_encoder_configurations(),
+        ];
+        for xml in &all {
+            parse(xml);
+        }
+    }
+
+    #[test]
+    fn service_addresses_point_at_the_right_paths() {
+        let xml = capabilities(ip(), 8080);
+        assert!(xml.contains("<tt:XAddr>http://192.0.2.10:8080/onvif/device_service</tt:XAddr>"));
+        assert!(xml.contains("<tt:XAddr>http://192.0.2.10:8080/onvif/media_service</tt:XAddr>"));
+        let xml = services(ip(), 8080, true);
+        assert!(xml.contains("<tds:XAddr>http://192.0.2.10:8080/onvif/media_service</tds:XAddr>"));
+        assert!(xml.contains("SnapshotUri=\"true\""));
+        assert!(xml.contains("HttpDigest=\"true\""));
+    }
+
+    #[test]
+    fn stream_uri_includes_required_media_uri_fields() {
+        let doc_xml = stream_uri("rtsp://192.0.2.10:8554/a&b");
+        let doc = parse(&doc_xml);
+        assert_eq!(text_of(&doc, "Uri"), Some("rtsp://192.0.2.10:8554/a&b"));
+        assert_eq!(text_of(&doc, "InvalidAfterConnect"), Some("false"));
+        assert_eq!(text_of(&doc, "InvalidAfterReboot"), Some("false"));
+        assert_eq!(text_of(&doc, "Timeout"), Some("PT0S"));
+        let snap_xml = snapshot_uri(ip(), 8080);
+        let snap = parse(&snap_xml);
+        assert_eq!(
+            text_of(&snap, "Uri"),
+            Some("http://192.0.2.10:8080/snapshot.jpg")
+        );
+    }
+
+    #[test]
+    fn profile_reflects_probed_stream() {
+        let stream = StreamInfo {
+            encoding: VideoEncoding::H264,
+            width: 1280,
+            height: 720,
+            framerate: 30,
+            bitrate_kbps: 2500,
+            h264_profile: Some("High".to_string()),
+            probed: true,
+        };
+        let xml = profiles(&stream);
+        let doc = parse(&xml);
+        assert_eq!(text_of(&doc, "Width"), Some("1280"));
+        assert_eq!(text_of(&doc, "Height"), Some("720"));
+        assert_eq!(text_of(&doc, "FrameRateLimit"), Some("30"));
+        assert_eq!(text_of(&doc, "BitrateLimit"), Some("2500"));
+        assert_eq!(text_of(&doc, "H264Profile"), Some("High"));
+        assert_eq!(text_of(&doc, "Encoding"), Some("H264"));
+        assert!(xml.contains(&format!("token=\"{PROFILE_TOKEN}\"")));
+
+        // Encoder configuration and profile agree.
+        let enc_xml = video_encoder_configurations(&stream);
+        let enc = parse(&enc_xml);
+        assert_eq!(text_of(&enc, "H264Profile"), Some("High"));
+        assert_eq!(text_of(&enc, "Width"), Some("1280"));
+    }
+
+    #[test]
+    fn h265_streams_do_not_emit_h264_block() {
+        let stream = StreamInfo {
+            encoding: VideoEncoding::H265,
+            h264_profile: None,
+            ..StreamInfo::default()
+        };
+        let xml = profiles(&stream);
+        assert!(xml.contains("<tt:Encoding>H265</tt:Encoding>"));
+        assert!(!xml.contains("<tt:H264>"));
+    }
+
+    #[test]
+    fn device_information_is_escaped() {
+        let xml = device_information(&identity());
+        let doc = parse(&xml);
+        assert_eq!(text_of(&doc, "Model"), Some("Test <Cam> & Co"));
+        assert_eq!(
+            text_of(&doc, "FirmwareVersion"),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        let host_xml = hostname(&identity());
+        let host = parse(&host_xml);
+        assert_eq!(text_of(&host, "Name"), Some("Test--Cam----Co"));
+    }
 }

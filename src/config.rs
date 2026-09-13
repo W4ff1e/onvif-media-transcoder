@@ -112,6 +112,25 @@ impl Config {
         Ok(())
     }
 
+    /// The RTSP URL this process itself uses for snapshots and probing,
+    /// carrying the ONVIF credentials so it works when MediaMTX requires
+    /// authentication. Clients receive the plain URL and use their own
+    /// device credentials, as ONVIF specifies.
+    pub fn internal_rtsp_url(&self) -> String {
+        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+        let Some(rest) = self.rtsp_stream_url.strip_prefix("rtsp://") else {
+            return self.rtsp_stream_url.clone();
+        };
+        if rest.contains('@') {
+            return self.rtsp_stream_url.clone();
+        }
+        format!(
+            "rtsp://{}:{}@{rest}",
+            utf8_percent_encode(&self.onvif_username, NON_ALPHANUMERIC),
+            utf8_percent_encode(&self.onvif_password, NON_ALPHANUMERIC)
+        )
+    }
+
     /// Logs the effective configuration without the password.
     pub fn display(&self) {
         info!(
@@ -158,6 +177,17 @@ mod tests {
         let c = parse(&["--ws-discovery-enabled", "no", "--debug=yes"]).unwrap();
         assert!(!c.ws_discovery_enabled);
         assert!(c.debug);
+    }
+
+    #[test]
+    fn internal_rtsp_url_embeds_encoded_credentials() {
+        let c = parse(&["-r", "rtsp://10.0.0.5:8554/stream", "-p", "p@ss:w/rd"]).unwrap();
+        assert_eq!(
+            c.internal_rtsp_url(),
+            "rtsp://admin:p%40ss%3Aw%2Frd@10.0.0.5:8554/stream"
+        );
+        let c = parse(&["-r", "rtsp://u:p@10.0.0.5:8554/stream"]).unwrap();
+        assert_eq!(c.internal_rtsp_url(), "rtsp://u:p@10.0.0.5:8554/stream");
     }
 
     #[test]

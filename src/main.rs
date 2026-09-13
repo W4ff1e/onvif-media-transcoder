@@ -60,6 +60,7 @@ fn main() {
         "starting ONVIF HTTP service"
     );
     let service = Arc::new(OnvifService::new(config, identity));
+    service.start_stream_probe(Arc::clone(&shutdown));
     let server = match service.serve(&bind_addr, HTTP_WORKERS) {
         Ok(server) => server,
         Err(e) => {
