@@ -1,4 +1,5 @@
 use onvif_media_transcoder::config::Config;
+use onvif_media_transcoder::identity::DeviceIdentity;
 use onvif_media_transcoder::onvif::OnvifService;
 use onvif_media_transcoder::ws_discovery::{DeviceInfo, WSDiscoveryServer};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,8 +37,10 @@ fn main() {
         }
     }
 
+    let identity = DeviceIdentity::new(&config.device_name);
+
     let ws_discovery = if config.ws_discovery_enabled {
-        match start_ws_discovery(&config, Arc::clone(&shutdown)) {
+        match start_ws_discovery(&config, &identity, Arc::clone(&shutdown)) {
             Ok(handle) => Some(handle),
             Err(e) => {
                 error!(error = %e, "failed to start WS-Discovery");
@@ -56,7 +59,7 @@ fn main() {
         device = %config.device_name,
         "starting ONVIF HTTP service"
     );
-    let service = Arc::new(OnvifService::new(config));
+    let service = Arc::new(OnvifService::new(config, identity));
     let server = match service.serve(&bind_addr, HTTP_WORKERS) {
         Ok(server) => server,
         Err(e) => {
@@ -82,40 +85,33 @@ fn main() {
     info!("stopped");
 }
 
+/// Initialises logging. `RUST_LOG` takes precedence; otherwise the debug
+/// flag selects `debug` or `info`. Colours are only used on a terminal so
+/// container logs stay clean.
 fn init_logging(debug: bool) {
+    use std::io::IsTerminal;
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(if debug { "debug" } else { "info" }));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        .with_ansi(std::io::stdout().is_terminal())
         .init();
 }
 
 fn start_ws_discovery(
     config: &Config,
+    identity: &DeviceIdentity,
     shutdown: Arc<AtomicBool>,
 ) -> Result<thread::JoinHandle<()>, Box<dyn std::error::Error + Send + Sync>> {
-    let interface: std::net::Ipv4Addr = config.container_ip.parse().map_err(|_| {
-        format!(
-            "CONTAINER_IP must be an IPv4 address for WS-Discovery, got '{}'",
-            config.container_ip
-        )
-    })?;
-
     let device_info = DeviceInfo {
-        endpoint_reference: format!("urn:uuid:{}", uuid::Uuid::new_v4()),
-        scopes: format!(
-            "onvif://www.onvif.org/type/NetworkVideoTransmitter onvif://www.onvif.org/Profile/Streaming onvif://www.onvif.org/name/{name} onvif://www.onvif.org/hardware/{name} onvif://www.onvif.org/location/Unknown",
-            name = config.device_name
-        ),
-        xaddrs: format!(
-            "http://{}:{}/onvif/device_service",
-            config.container_ip, config.onvif_port
-        ),
+        endpoint_reference: identity.endpoint_reference.clone(),
+        scopes: identity.scopes(),
+        xaddrs: DeviceIdentity::device_service_url(config.container_ip, config.onvif_port),
     };
 
-    let server = WSDiscoveryServer::new(device_info, interface)?;
+    let server = WSDiscoveryServer::new(device_info, config.container_ip)?;
     let handle = thread::Builder::new()
         .name("ws-discovery".to_string())
         .spawn(move || server.run(&shutdown))?;

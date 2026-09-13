@@ -1,142 +1,176 @@
-use clap::Parser;
-use std::net::IpAddr;
+//! Runtime configuration.
+//!
+//! Every option can be given as a command-line flag or as an environment
+//! variable, so the container entrypoint only needs to export variables and
+//! local development can use flags.
 
-/// Configuration structure for the ONVIF Media Transcoder
+use clap::builder::BoolishValueParser;
+use clap::{ArgAction, Parser};
+use std::net::Ipv4Addr;
+use tracing::info;
+
+/// Configuration for the ONVIF Media Transcoder.
 #[derive(Debug, Clone, Parser)]
-#[command(name = "onvif-media-transcoder")]
-#[command(
-    about = "ONVIF Media Transcoder - Converts media streams to ONVIF-compatible RTSP streams"
-)]
+#[command(name = "onvif-media-transcoder", version)]
+#[command(about = "Exposes an RTSP stream as an ONVIF Profile S camera with WS-Discovery")]
 pub struct Config {
-    /// RTSP stream URL to transcode
-    #[arg(short = 'r', long, default_value = "rtsp://127.0.0.1:8554/stream")]
+    /// RTSP URL of the stream served by MediaMTX that clients will play
+    #[arg(
+        short = 'r',
+        long,
+        env = "RTSP_STREAM_URL",
+        default_value = "rtsp://127.0.0.1:8554/stream"
+    )]
     pub rtsp_stream_url: String,
 
-    /// Port for the ONVIF service
-    #[arg(short = 'P', long, default_value = "8080")]
-    pub onvif_port: String,
+    /// TCP port for the ONVIF HTTP service
+    #[arg(short = 'P', long, env = "ONVIF_PORT", default_value_t = 8080)]
+    pub onvif_port: u16,
 
-    /// Device name for ONVIF identification
-    #[arg(short = 'n', long, default_value = "ONVIF-Media-Transcoder")]
+    /// Device name reported to ONVIF clients and used in discovery scopes
+    #[arg(
+        short = 'n',
+        long,
+        env = "DEVICE_NAME",
+        default_value = "ONVIF-Media-Transcoder"
+    )]
     pub device_name: String,
 
     /// Username for ONVIF authentication
-    #[arg(short = 'u', long, default_value = "admin")]
+    #[arg(short = 'u', long, env = "ONVIF_USERNAME", default_value = "admin")]
     pub onvif_username: String,
 
     /// Password for ONVIF authentication
-    #[arg(short = 'p', long, default_value = "onvif-rust")]
+    #[arg(
+        short = 'p',
+        long,
+        env = "ONVIF_PASSWORD",
+        default_value = "onvif-rust",
+        hide_env_values = true
+    )]
     pub onvif_password: String,
 
-    /// Container IP address for WS-Discovery
-    #[arg(long = "container-ip", short = 'i', default_value = "127.0.0.1")]
-    pub container_ip: String,
+    /// IPv4 address clients use to reach this device; advertised in
+    /// discovery and service addresses
+    #[arg(
+        short = 'i',
+        long,
+        env = "CONTAINER_IP",
+        default_value_t = Ipv4Addr::LOCALHOST
+    )]
+    pub container_ip: Ipv4Addr,
 
-    /// Enable WS-Discovery service for automatic device discovery
-    #[arg(long = "ws-discovery-enabled", short = 'w', action = clap::ArgAction::SetTrue)]
+    /// Enable the WS-Discovery responder (true/false, yes/no, 1/0)
+    #[arg(
+        short = 'w',
+        long,
+        env = "WS_DISCOVERY_ENABLED",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        value_parser = BoolishValueParser::new()
+    )]
     pub ws_discovery_enabled: bool,
 
-    /// Enable debug mode with verbose request logging (NOT FOR PRODUCTION USE, LOGS SENSITIVE INFORMATION)
-    #[arg(short = 'd', long = "debug", action = clap::ArgAction::SetTrue)]
+    /// Enable debug logging. Logs full requests, including credentials.
+    #[arg(
+        short = 'd',
+        long,
+        env = "DEBUG_LOGGING",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set,
+        value_parser = BoolishValueParser::new()
+    )]
     pub debug: bool,
 }
 
 impl Config {
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        println!("Parsing command-line arguments...");
+    /// Parses flags and environment variables and validates them.
+    pub fn load() -> Result<Self, String> {
         let config = Config::parse();
-
-        // Validate port number
-        println!("Validating port number...");
-        let _: u16 = config
-            .onvif_port
-            .parse()
-            .map_err(|_| "ONVIF_PORT must be a valid port number")?;
-        println!("Port validation successful");
-
-        // Validate container IP is not empty
-        if config.container_ip.is_empty() {
-            return Err("CONTAINER_IP cannot be empty".into());
-        }
-
-        // Basic IP format validation
-        if config.container_ip.parse::<IpAddr>().is_err() {
-            return Err(format!(
-                "CONTAINER_IP '{}' is not a valid IP address",
-                config.container_ip
-            )
-            .into());
-        }
-
-        // Validate RTSP stream URL format
-        if !config.rtsp_stream_url.starts_with("rtsp://") {
-            return Err(format!(
-                "RTSP_STREAM_URL must start with 'rtsp://', got: {}",
-                config.rtsp_stream_url
-            )
-            .into());
-        }
-
-        println!("Configuration creation completed successfully");
+        config.validate()?;
         Ok(config)
     }
 
-    pub fn display(&self) {
-        println!("Configuration:");
-
-        // Check if default values are being used and log accordingly
-        if self.rtsp_stream_url == "rtsp://127.0.0.1:8554/stream" {
-            println!(
-                "  RTSP Input Stream: {} (using default)",
+    /// Checks constraints that clap cannot express.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.rtsp_stream_url.starts_with("rtsp://") {
+            return Err(format!(
+                "RTSP_STREAM_URL must start with 'rtsp://', got '{}'",
                 self.rtsp_stream_url
-            );
-        } else {
-            println!("  RTSP Input Stream: {}", self.rtsp_stream_url);
+            ));
         }
-
-        if self.onvif_port == "8080" {
-            println!("  ONVIF Port: {} (using default)", self.onvif_port);
-        } else {
-            println!("  ONVIF Port: {}", self.onvif_port);
+        if self.device_name.trim().is_empty() {
+            return Err("DEVICE_NAME must not be empty".to_string());
         }
-
-        if self.device_name == "ONVIF-Media-Transcoder" {
-            println!("  Device Name: {} (using default)", self.device_name);
-        } else {
-            println!("  Device Name: {}", self.device_name);
+        if self.onvif_username.is_empty() || self.onvif_password.is_empty() {
+            return Err("ONVIF_USERNAME and ONVIF_PASSWORD must not be empty".to_string());
         }
+        Ok(())
+    }
 
-        if self.onvif_username == "admin" {
-            println!("  ONVIF Username: {} (using default)", self.onvif_username);
-        } else {
-            println!("  ONVIF Username: {}", self.onvif_username);
-        }
-
-        if self.onvif_password == "onvif-rust" {
-            println!("  ONVIF Password: [HIDDEN] (using default)");
-        } else {
-            println!("  ONVIF Password: [HIDDEN]");
-        }
-
-        if self.container_ip == "127.0.0.1" {
-            println!("  Container IP: {} (using default)", self.container_ip);
-        } else {
-            println!("  Container IP: {}", self.container_ip);
-        }
-
-        println!(
-            "  WS-Discovery: {}",
-            if self.ws_discovery_enabled {
-                "ENABLED"
-            } else {
-                "DISABLED"
-            }
+    /// Logs the effective configuration without the password.
+    pub fn display(&self) {
+        info!(
+            rtsp_stream_url = %self.rtsp_stream_url,
+            onvif_port = self.onvif_port,
+            device_name = %self.device_name,
+            onvif_username = %self.onvif_username,
+            container_ip = %self.container_ip,
+            ws_discovery_enabled = self.ws_discovery_enabled,
+            debug = self.debug,
+            "configuration"
         );
+    }
+}
 
-        if self.debug {
-            println!("  Debug Mode: ENABLED (verbose request logging)");
-        } else {
-            println!("  Debug Mode: DISABLED");
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Config, clap::Error> {
+        let mut full = vec!["onvif-media-transcoder"];
+        full.extend_from_slice(args);
+        Config::try_parse_from(full)
+    }
+
+    #[test]
+    fn defaults() {
+        let c = parse(&[]).unwrap();
+        assert_eq!(c.onvif_port, 8080);
+        assert_eq!(c.container_ip, Ipv4Addr::LOCALHOST);
+        assert!(!c.ws_discovery_enabled);
+        assert!(!c.debug);
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn flags_and_boolish_values() {
+        let c = parse(&["-w", "-d", "-P", "9000", "-i", "192.0.2.5"]).unwrap();
+        assert!(c.ws_discovery_enabled);
+        assert!(c.debug);
+        assert_eq!(c.onvif_port, 9000);
+        assert_eq!(c.container_ip, Ipv4Addr::new(192, 0, 2, 5));
+
+        let c = parse(&["--ws-discovery-enabled", "no", "--debug=yes"]).unwrap();
+        assert!(!c.ws_discovery_enabled);
+        assert!(c.debug);
+    }
+
+    #[test]
+    fn rejects_invalid_values() {
+        assert!(parse(&["-P", "70000"]).is_err());
+        assert!(parse(&["-P", "abc"]).is_err());
+        assert!(parse(&["-i", "fd00::1"]).is_err());
+        assert!(parse(&["-i", "not-an-ip"]).is_err());
+        assert!(parse(&["-w", "maybe"]).is_err());
+
+        let c = parse(&["-r", "http://x/stream"]).unwrap();
+        assert!(c.validate().is_err());
+        let c = parse(&["-n", "  "]).unwrap();
+        assert!(c.validate().is_err());
     }
 }

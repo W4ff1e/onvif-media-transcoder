@@ -6,6 +6,7 @@ pub mod snapshot;
 pub mod soap;
 
 use crate::config::Config;
+use crate::identity::DeviceIdentity;
 use auth::{AuthResult, Authenticator};
 use soap::{soap_fault, FaultCode, SoapRequest};
 use std::io::Read;
@@ -75,13 +76,18 @@ impl OnvifResponse {
 /// The ONVIF device and media service.
 pub struct OnvifService {
     config: Config,
+    identity: DeviceIdentity,
     auth: Authenticator,
 }
 
 impl OnvifService {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, identity: DeviceIdentity) -> Self {
         let auth = Authenticator::new(&config.onvif_username, &config.onvif_password);
-        Self { config, auth }
+        Self {
+            config,
+            identity,
+            auth,
+        }
     }
 
     pub fn config(&self) -> &Config {
@@ -204,14 +210,16 @@ impl OnvifService {
             }
         }
 
-        let ip = &self.config.container_ip;
-        let port = &self.config.onvif_port;
+        let ip = self.config.container_ip.to_string();
+        let ip = ip.as_str();
+        let port = self.config.onvif_port.to_string();
+        let port = port.as_str();
         let body = match action {
             "GetCapabilities" => responses::get_capabilities_response(ip, port),
             "GetServices" => responses::get_services_response(ip, port),
             "GetServiceCapabilities" => responses::get_service_capabilities_response(),
             "GetSystemDateAndTime" => responses::get_system_date_time_response(),
-            "GetDeviceInformation" => responses::get_device_info_response(&self.config.device_name),
+            "GetDeviceInformation" => responses::get_device_info_response(&self.identity),
             "GetProfiles" => responses::get_profiles_response(),
             "GetStreamUri" => responses::get_stream_uri_response(&self.config.rtsp_stream_url),
             "GetSnapshotUri" => responses::get_snapshot_uri_response(ip, port),
@@ -373,7 +381,8 @@ mod tests {
     fn service() -> OnvifService {
         let config =
             Config::try_parse_from(["test", "-r", "rtsp://127.0.0.1:8554/stream"]).expect("config");
-        OnvifService::new(config)
+        let identity = DeviceIdentity::new(&config.device_name);
+        OnvifService::new(config, identity)
     }
 
     fn envelope(body: &str) -> Vec<u8> {

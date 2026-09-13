@@ -3,6 +3,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use clap::Parser;
 use onvif_media_transcoder::config::Config;
+use onvif_media_transcoder::identity::DeviceIdentity;
 use onvif_media_transcoder::onvif::{OnvifService, ServerHandle};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -18,7 +19,8 @@ fn start_server() -> (ServerHandle, SocketAddr) {
         "0",
     ])
     .expect("config parses");
-    let service = Arc::new(OnvifService::new(config));
+    let identity = DeviceIdentity::new(&config.device_name);
+    let service = Arc::new(OnvifService::new(config, identity));
     let handle = service.serve("127.0.0.1:0", 2).expect("server starts");
     let addr = handle.local_addr().expect("bound address");
     (handle, addr)

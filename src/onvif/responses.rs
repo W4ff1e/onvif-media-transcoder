@@ -1,7 +1,8 @@
 // ONVIF Response Templates
 // This module contains all the hardcoded ONVIF SOAP responses
 
-use crate::onvif::soap::SoapResponseBuilder;
+use crate::identity::DeviceIdentity;
+use crate::onvif::soap::{xml_escape, SoapResponseBuilder};
 use chrono::{Datelike, Timelike};
 
 pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String {
@@ -234,17 +235,20 @@ pub fn get_stream_uri_response(rtsp_stream: &str) -> String {
         .build()
 }
 
-pub fn get_device_info_response(device_name: &str) -> String {
+pub fn get_device_info_response(identity: &DeviceIdentity) -> String {
     let body_content = format!(
         r#"<tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-<tds:Manufacturer>ONVIF Media Solutions</tds:Manufacturer>
+<tds:Manufacturer>{}</tds:Manufacturer>
 <tds:Model>{}</tds:Model>
-<tds:FirmwareVersion>1.0.0</tds:FirmwareVersion>
-<tds:SerialNumber>EMU-{}</tds:SerialNumber>
-<tds:HardwareId>onvif-media-transcoder</tds:HardwareId>
+<tds:FirmwareVersion>{}</tds:FirmwareVersion>
+<tds:SerialNumber>{}</tds:SerialNumber>
+<tds:HardwareId>{}</tds:HardwareId>
 </tds:GetDeviceInformationResponse>"#,
-        device_name,
-        device_name.chars().take(6).collect::<String>()
+        xml_escape(identity.manufacturer()),
+        xml_escape(&identity.name),
+        xml_escape(&identity.firmware_version),
+        xml_escape(&identity.serial_number),
+        xml_escape(identity.hardware_id())
     );
 
     SoapResponseBuilder::new().set_body(&body_content).build()
