@@ -433,4 +433,35 @@ mod tests {
         }
         assert!(build_hello(&d, 1, 1).contains("A&amp;B"));
     }
+
+    #[test]
+    fn ws_discovery_1_1_probe_is_recognised() {
+        let probe = r#"<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:d="http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"><e:Header><a:Action>http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01/Probe</a:Action><a:MessageID>urn:uuid:abc</a:MessageID></e:Header><e:Body><d:Probe><d:Types xmlns:dn="http://www.onvif.org/ver10/network/wsdl">dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body></e:Envelope>"#;
+        match classify_message(probe) {
+            IncomingMessage::Probe { message_id, types } => {
+                assert_eq!(message_id.as_deref(), Some("urn:uuid:abc"));
+                assert!(types_match(&types));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn probe_for_unrelated_types_is_classified_but_not_matched() {
+        let probe = r#"<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"><e:Header><Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</Action></e:Header><e:Body><Probe><Types>wsdp:Printer</Types></Probe></e:Body></e:Envelope>"#;
+        match classify_message(probe) {
+            IncomingMessage::Probe { types, .. } => assert!(!types_match(&types)),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_numbers_increase_per_message() {
+        let d = device();
+        let a = build_hello(&d, 5, 1);
+        let b = build_probe_match(&d, 5, 2, None);
+        assert!(a.contains("MessageNumber=\"1\""));
+        assert!(b.contains("MessageNumber=\"2\""));
+        assert!(!b.contains("RelatesTo"));
+    }
 }

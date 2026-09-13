@@ -694,4 +694,63 @@ mod tests {
             roxmltree::Document::parse(&r.body_str()).unwrap_or_else(|e| panic!("{op}: {e}"));
         }
     }
+
+    #[test]
+    fn get_services_include_capability_flag() {
+        let svc = service();
+        let without = svc.handle(
+            "POST",
+            "/onvif/device_service",
+            None,
+            &envelope("<tds:GetServices xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\"><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>"),
+        );
+        assert!(!without.body_str().contains("SnapshotUri="));
+        let with = svc.handle(
+            "POST",
+            "/onvif/device_service",
+            None,
+            &envelope("<tds:GetServices xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\"><tds:IncludeCapability>true</tds:IncludeCapability></tds:GetServices>"),
+        );
+        assert!(with.body_str().contains("SnapshotUri=\"true\""));
+    }
+
+    #[test]
+    fn profile_reflects_updated_stream_info() {
+        let svc = service();
+        svc.stream().set(stream_info::StreamInfo {
+            width: 1280,
+            height: 720,
+            framerate: 30,
+            ..stream_info::StreamInfo::default()
+        });
+        let r = svc.handle(
+            "POST",
+            "/onvif/media_service",
+            Some(&basic()),
+            &envelope("<GetProfiles/>"),
+        );
+        assert!(r.body_str().contains("<tt:Width>1280</tt:Width>"));
+        assert!(
+            r.body_str()
+                .contains("<tt:FrameRateLimit>30</tt:FrameRateLimit>")
+        );
+    }
+
+    #[test]
+    fn stale_digest_nonce_gets_a_stale_challenge() {
+        let svc = service();
+        let header = "Digest username=\"admin\", realm=\"ONVIF\", nonce=\"unknown\", uri=\"/onvif/media_service\", qop=auth, nc=00000001, cnonce=\"x\", response=\"00\"";
+        let r = svc.handle(
+            "POST",
+            "/onvif/media_service",
+            Some(header),
+            &envelope("<GetProfiles/>"),
+        );
+        assert_eq!(r.status, 401);
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| k == "WWW-Authenticate" && v.contains("stale=true"))
+        );
+    }
 }

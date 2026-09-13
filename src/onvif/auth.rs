@@ -550,4 +550,56 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
     }
+
+    #[test]
+    fn digest_md5_sess_and_case_insensitive_scheme() {
+        let a = auth();
+        let nonce = nonce_from_challenge(&a);
+        let uri = "/onvif/device_service";
+        let ha1 = md5_hex(&format!("admin:{REALM}:onvif-rust"));
+        let ha1_sess = md5_hex(&format!("{ha1}:{nonce}:xyz"));
+        let ha2 = md5_hex(&format!("POST:{uri}"));
+        let response = md5_hex(&format!("{ha1_sess}:{nonce}:00000001:xyz:auth:{ha2}"));
+        let header = format!(
+            "digest username=\"admin\", realm=\"{REALM}\", nonce=\"{nonce}\", uri=\"{uri}\", qop=auth, nc=00000001, cnonce=\"xyz\", response=\"{response}\", algorithm=MD5-sess"
+        );
+        assert_eq!(
+            a.authenticate("POST", uri, Some(&header), None),
+            AuthResult::Authenticated
+        );
+        assert_eq!(
+            a.authenticate("POST", uri, Some("Bearer abc"), None),
+            AuthResult::Missing
+        );
+    }
+
+    #[test]
+    fn digest_rejects_unsupported_algorithm_and_qop() {
+        let a = auth();
+        let nonce = nonce_from_challenge(&a);
+        let header = digest_header(&nonce, "00000001", "abc", "POST", "/", "onvif-rust")
+            .replace("algorithm=MD5", "algorithm=SHA-512");
+        assert_eq!(
+            a.authenticate("POST", "/", Some(&header), None),
+            AuthResult::Invalid
+        );
+        let header = digest_header(&nonce, "00000002", "abc", "POST", "/", "onvif-rust")
+            .replace("qop=auth", "qop=auth-int");
+        assert_eq!(
+            a.authenticate("POST", "/", Some(&header), None),
+            AuthResult::Invalid
+        );
+    }
+
+    #[test]
+    fn challenge_nonces_are_unique_and_marked_stale_on_request() {
+        let a = auth();
+        let n1 = nonce_from_challenge(&a);
+        let n2 = nonce_from_challenge(&a);
+        assert_ne!(n1, n2);
+        let stale = a.challenge_headers(true).remove(0);
+        assert!(stale.contains("stale=true"));
+        let fresh = a.challenge_headers(false).remove(0);
+        assert!(fresh.contains("stale=false"));
+    }
 }
