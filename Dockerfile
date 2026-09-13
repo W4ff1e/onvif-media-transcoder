@@ -1,106 +1,99 @@
 # syntax=docker/dockerfile:1
 # check=skip=SecretsUsedInArgOrEnv
 
-# Build stage - for compiling Rust dependencies and application
-FROM rust:alpine AS builder
+ARG RUST_VERSION=1.98.1
+ARG ALPINE_VERSION=3.22
+ARG MEDIAMTX_VERSION=v1.21.0
 
-# Declare build arguments for cross-platform support
-ARG TARGETARCH
+# ---------------------------------------------------------------------------
+# Build stage. rust:*-alpine targets musl natively, so a single `cargo build`
+# produces a static binary for whichever platform BuildKit is building.
+# ---------------------------------------------------------------------------
+FROM rust:${RUST_VERSION}-alpine${ALPINE_VERSION} AS builder
 
-# Install build tools and cross-compilation targets
-RUN apk add --no-cache build-base musl-dev
+# hadolint ignore=DL3018
+RUN apk add --no-cache build-base
 
-# Add Rust targets for cross-compilation
-RUN case ${TARGETARCH} in \
-    "amd64") rustup target add x86_64-unknown-linux-musl ;; \
-    "arm64") rustup target add aarch64-unknown-linux-musl ;; \
-    *) echo "Unsupported architecture: ${TARGETARCH}. Supported: amd64, arm64" && exit 1 ;; \
-    esac
-
-# Set working directory
 WORKDIR /app
 
-# Copy dependency files first (for Docker layer caching)
+# Compile dependencies first so they are cached independently of src/.
 COPY Cargo.toml Cargo.lock ./
-
-# Create a dummy source structure to build dependencies
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs
-
-# Pre-compile dependencies with cache mount for faster subsequent builds
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && : > src/lib.rs
 RUN --mount=type=cache,target=/app/target,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    case ${TARGETARCH} in \
-    "amd64") cargo build --release --target x86_64-unknown-linux-musl ;; \
-    "arm64") cargo build --release --target aarch64-unknown-linux-musl ;; \
-    esac
+    cargo build --release --locked
 
-# Remove dummy source
-RUN rm -rf src
-
-# Copy the actual source code
+# Build the real application. `touch` ensures cargo sees the copied sources
+# as newer than the placeholder build in the cache mount.
 COPY src ./src
-
-# Build the actual application with cache mount
 RUN --mount=type=cache,target=/app/target,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    case ${TARGETARCH} in \
-    "amd64") cargo build --release --target x86_64-unknown-linux-musl && \
-    cp target/x86_64-unknown-linux-musl/release/onvif-media-transcoder /tmp/onvif-media-transcoder ;; \
-    "arm64") cargo build --release --target aarch64-unknown-linux-musl && \
-    cp target/aarch64-unknown-linux-musl/release/onvif-media-transcoder /tmp/onvif-media-transcoder ;; \
-    esac
+    find src -type f -exec touch {} + && \
+    cargo build --release --locked && \
+    mkdir -p /out && cp target/release/onvif-media-transcoder /out/
 
-# Runtime stage - minimal image for running the application
-FROM alpine:latest
+# ---------------------------------------------------------------------------
+# Runtime stage.
+# ---------------------------------------------------------------------------
+FROM alpine:${ALPINE_VERSION}
 
-# Declare build arguments for cross-platform support
 ARG TARGETARCH
+ARG MEDIAMTX_VERSION
 
-# Declare version of MediaMTX to install
-# This can be overridden at build time with --build-arg MEDIAMTX_VERSION=vX.Y.Z
-# Default version is set to v1.13.0
-ARG MEDIAMTX_VERSION=v1.13.0
+SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 
-# Install runtime dependencies including image processing libraries
-RUN apk add --no-cache curl ffmpeg musl-dev
+# ffmpeg provides ffprobe (input validation, stream probing) and snapshots;
+# curl is used by the HEALTHCHECK and to fetch MediaMTX.
+# hadolint ignore=DL3018
+RUN apk add --no-cache ca-certificates curl ffmpeg tzdata
 
-# Download and install MediaMTX (architecture-aware)
-RUN case ${TARGETARCH} in \
-    "amd64") MEDIAMTX_ARCH="amd64" ;; \
-    "arm64") MEDIAMTX_ARCH="arm64" ;; \
-    *) echo "Unsupported architecture: ${TARGETARCH}. Supported: amd64, arm64" && exit 1 ;; \
+# Install MediaMTX and verify it against the published checksums.
+WORKDIR /tmp
+RUN case "${TARGETARCH}" in \
+        amd64|arm64) ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH} (supported: amd64, arm64)" && exit 1 ;; \
     esac && \
-    echo "Downloading MediaMTX ${MEDIAMTX_VERSION} for architecture: ${MEDIAMTX_ARCH}" && \
-    curl -L "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_${MEDIAMTX_ARCH}.tar.gz" \
-    | tar -xz -C /usr/local/bin/ mediamtx && \
-    echo "MediaMTX ${MEDIAMTX_VERSION} installation completed for ${MEDIAMTX_ARCH}"
+    ARCHIVE="mediamtx_${MEDIAMTX_VERSION}_linux_${TARGETARCH}.tar.gz" && \
+    BASE="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}" && \
+    curl -fsSL -o "${ARCHIVE}" "${BASE}/${ARCHIVE}" && \
+    curl -fsSL -o checksums.sha256 "${BASE}/checksums.sha256" && \
+    EXPECTED="$(grep -E "[ *]${ARCHIVE}\$" checksums.sha256 | awk '{print $1}')" && \
+    ACTUAL="$(sha256sum "${ARCHIVE}" | awk '{print $1}')" && \
+    if [ -z "${EXPECTED}" ] || [ "${EXPECTED}" != "${ACTUAL}" ]; then \
+        echo "MediaMTX checksum mismatch: expected '${EXPECTED}' got '${ACTUAL}'" && exit 1; \
+    fi && \
+    tar -xzf "${ARCHIVE}" -C /usr/local/bin mediamtx && \
+    rm -f "${ARCHIVE}" checksums.sha256 && \
+    mediamtx --version
+WORKDIR /
 
-# Copy configuration files
-COPY entrypoint.sh /entrypoint.sh
-COPY mediamtx.yml /etc/mediamtx.yml
-RUN chmod +x /entrypoint.sh
+# Run as an unprivileged user. Ports below 1024 need --cap-add NET_BIND_SERVICE.
+RUN addgroup -S -g 10001 onvif && adduser -S -D -H -G onvif -u 10001 onvif
 
-# Copy the built binary from the builder stage
-COPY --from=builder /tmp/onvif-media-transcoder /usr/local/bin/
+COPY --chmod=755 entrypoint.sh /entrypoint.sh
+COPY --from=builder /out/onvif-media-transcoder /usr/local/bin/onvif-media-transcoder
 
-# Set environment variables with default values
-ENV INPUT_URL="https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8"
-ENV RTSP_OUTPUT_PORT="8554"
-ENV RTSP_PATH="/stream"
-ENV ONVIF_PORT="8080"
-ENV DEVICE_NAME="ONVIF-Media-Transcoder"
-ENV ONVIF_USERNAME="admin"
-ENV ONVIF_PASSWORD="onvif-rust"
-ENV WS_DISCOVERY_ENABLED="true"
-ENV DEBUGLOGGING="false"
+# Defaults; every value can be overridden at run time. See README.md.
+# hadolint ignore=DL3064
+ENV INPUT_URL="https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8" \
+    RTSP_OUTPUT_PORT="8554" \
+    RTSP_PATH="/stream" \
+    ONVIF_PORT="8080" \
+    DEVICE_NAME="ONVIF-Media-Transcoder" \
+    ONVIF_USERNAME="admin" \
+    ONVIF_PASSWORD="onvif-rust" \
+    WS_DISCOVERY_ENABLED="true" \
+    RTSP_AUTH_ENABLED="true" \
+    INPUT_CHECK="warn" \
+    DEBUG_LOGGING="false"
 
-# Expose the ports (TCP for ONVIF, UDP for WS-Discovery) - respects build-time configuration
-EXPOSE ${ONVIF_PORT} ${RTSP_OUTPUT_PORT} 3702/udp
+USER 10001:10001
 
-# Set the default command to kick off the entrypoint script
-# This script will handle the configuration and start the MediaMTX server
-# and the ONVIF Media Transcoder application.
-CMD ["/entrypoint.sh"]
+EXPOSE 8080/tcp 8554/tcp 3702/udp
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["/bin/sh", "-c", "curl -fsS \"http://127.0.0.1:${ONVIF_PORT}/\" > /dev/null || exit 1"]
+
+ENTRYPOINT ["/entrypoint.sh"]
