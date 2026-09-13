@@ -1,543 +1,436 @@
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+//! WS-Discovery responder for ONVIF device discovery.
+//!
+//! Listens on the well-known multicast group, answers `Probe` messages with
+//! `ProbeMatches`, announces itself with `Hello` and says goodbye with `Bye`
+//! on shutdown. Incoming messages are parsed as XML and classified by the
+//! `wsa:Action` header, so the responder never reacts to its own or other
+//! devices' announcements.
+
+use crate::onvif::soap::xml_escape;
+use roxmltree::Document;
+use socket2::{Domain, Protocol, Socket, Type};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
-/// WS-Discovery multicast address and port
-const WS_DISCOVERY_MULTICAST_ADDR: &str = "239.255.255.250:3702";
-/// WS-Discovery namespace URI
-const WS_DISCOVERY_NAMESPACE: &str = "http://schemas.xmlsoap.org/ws/2005/04/discovery";
-/// WS-Addressing namespace URI
-const WS_ADDRESSING_NAMESPACE: &str = "http://www.w3.org/2005/08/addressing";
+/// WS-Discovery multicast group.
+pub const WS_DISCOVERY_MULTICAST_GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
+/// WS-Discovery UDP port.
+pub const WS_DISCOVERY_PORT: u16 = 3702;
+/// WS-Discovery (April 2005) namespace used by ONVIF.
+pub const WS_DISCOVERY_NAMESPACE: &str = "http://schemas.xmlsoap.org/ws/2005/04/discovery";
+/// WS-Discovery 1.1 (OASIS) namespace, accepted on input.
+pub const WS_DISCOVERY_11_NAMESPACE: &str = "http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01";
+/// WS-Addressing namespace.
+pub const WS_ADDRESSING_NAMESPACE: &str = "http://www.w3.org/2005/08/addressing";
+/// ONVIF network device type namespace.
+pub const ONVIF_NETWORK_NAMESPACE: &str = "http://www.onvif.org/ver10/network/wsdl";
+/// Interval between unsolicited Hello announcements.
+pub const HELLO_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Device information for WS-Discovery announcements and responses
+/// Device information advertised through WS-Discovery.
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
-    /// Unique endpoint reference for the device
+    /// Stable endpoint reference, e.g. `urn:uuid:...`.
     pub endpoint_reference: String,
-    /// Device types (e.g., "tdn:NetworkVideoTransmitter")
-    pub types: String,
-    /// Device scopes for discovery filtering
+    /// Space separated list of ONVIF scope URIs.
     pub scopes: String,
-    /// ONVIF service addresses (XAddrs)
+    /// Space separated list of service addresses.
     pub xaddrs: String,
-    /// Device manufacturer name
-    #[allow(dead_code)]
-    pub manufacturer: String,
-    /// Device model name
-    #[allow(dead_code)]
-    pub model_name: String,
-    /// Human-readable device name
-    #[allow(dead_code)]
-    pub friendly_name: String,
-    /// Firmware version
-    #[allow(dead_code)]
-    pub firmware_version: String,
-    /// Device serial number
-    #[allow(dead_code)]
-    pub serial_number: String,
 }
 
-/// WS-Discovery server for ONVIF device discovery
-///
-/// This server handles multicast UDP communication for device discovery
-/// according to the WS-Discovery specification. It responds to probe requests
-/// and sends hello/bye announcements.
+/// A classified incoming WS-Discovery message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IncomingMessage {
+    /// A Probe we should answer, with the sender's MessageID if present.
+    Probe {
+        message_id: Option<String>,
+        types: Vec<String>,
+    },
+    /// Any other WS-Discovery or unrelated message.
+    Other(String),
+}
+
+/// WS-Discovery responder bound to the multicast group.
 pub struct WSDiscoveryServer {
     device_info: DeviceInfo,
     socket: UdpSocket,
-    debug: bool,
+    instance_id: u64,
+    message_number: AtomicU32,
 }
 
 impl WSDiscoveryServer {
-    /// Creates a new WS-Discovery server
-    ///
-    /// # Arguments
-    /// * `device_info` - Device information for announcements
-    /// * `interface_addr` - Local interface IP address to bind to
-    /// * `debug` - Enable verbose logging
-    ///
-    /// # Returns
-    /// * `Result<Self, Box<dyn std::error::Error>>` - Server instance or error
+    /// Binds the discovery socket on all interfaces and joins the multicast
+    /// group on `interface`.
     pub fn new(
         device_info: DeviceInfo,
-        interface_addr: &str,
-        debug: bool,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Bind to 0.0.0.0:3702 to listen on all interfaces for multicast
-        let bind_addr = "0.0.0.0:3702";
-        let socket = UdpSocket::bind(bind_addr)
-            .map_err(|e| format!("Failed to bind to {bind_addr}: {e}"))?;
+        interface: Ipv4Addr,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        // Other discovery responders (Windows, other cameras in host network
+        // mode) may already own port 3702; share it instead of failing.
+        socket.set_reuse_address(true)?;
+        socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, WS_DISCOVERY_PORT).into())?;
+        socket.join_multicast_v4(&WS_DISCOVERY_MULTICAST_GROUP, &interface)?;
+        socket.set_multicast_if_v4(&interface)?;
+        // Never receive our own announcements.
+        socket.set_multicast_loop_v4(false)?;
+        socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+        let socket: UdpSocket = socket.into();
 
-        // Set socket options for better multicast handling
-        socket
-            .set_broadcast(true)
-            .map_err(|e| format!("Failed to set broadcast: {e}"))?;
+        let instance_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(1);
 
-        // Join the multicast group
-        let multicast_addr: Ipv4Addr = "239.255.255.250"
-            .parse()
-            .map_err(|e| format!("Invalid multicast address: {e}"))?;
-        let interface_addr: Ipv4Addr = interface_addr
-            .parse()
-            .map_err(|e| format!("Invalid interface address: {e}"))?;
+        info!(%interface, port = WS_DISCOVERY_PORT, "WS-Discovery bound and joined multicast group");
 
-        socket
-            .join_multicast_v4(&multicast_addr, &interface_addr)
-            .map_err(|e| format!("Failed to join multicast group: {e}"))?;
-
-        println!("WS-Discovery server bound to {bind_addr}");
-        println!(
-            "Joined multicast group {WS_DISCOVERY_MULTICAST_ADDR} on interface {interface_addr}"
-        );
-
-        Ok(WSDiscoveryServer {
+        Ok(Self {
             device_info,
             socket,
-            debug,
+            instance_id,
+            message_number: AtomicU32::new(0),
         })
     }
 
-    /// Starts the WS-Discovery server main loop
-    ///
-    /// This method sends a hello message and then listens for incoming probe requests.
-    /// It will continue running until an unrecoverable error occurs.
-    ///
-    /// # Returns
-    /// * `Result<(), Box<dyn std::error::Error>>` - Ok if server stops gracefully, Err on error
-    pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Send Hello message on startup
-        self.send_hello()?;
+    /// Runs the responder until `stop` is set, then sends Bye.
+    pub fn run(&self, stop: &AtomicBool) {
+        if let Err(e) = self.send_hello() {
+            warn!(error = %e, "failed to send initial Hello");
+        }
 
-        println!("WS-Discovery server started, listening for probe requests...");
+        let mut buffer = [0u8; 8192];
+        let mut last_hello = Instant::now();
 
-        // Set a reasonable receive timeout to avoid blocking indefinitely
-        let timeout = std::time::Duration::from_secs(1);
-        self.socket.set_read_timeout(Some(timeout))?;
-
-        let mut buffer = [0; 4096];
-        let mut message_count = 0u32;
-        let mut last_hello = std::time::Instant::now();
-        let hello_interval = std::time::Duration::from_secs(60); // Send Hello every 60 seconds
-
-        loop {
+        while !stop.load(Ordering::Relaxed) {
             match self.socket.recv_from(&mut buffer) {
                 Ok((size, src)) => {
-                    message_count += 1;
                     let message = String::from_utf8_lossy(&buffer[..size]);
-                    if let Err(e) = self.handle_message(&message, src) {
-                        eprintln!(
-                            "Error handling WS-Discovery message #{message_count} from {src}: {e}"
-                        );
-                    }
+                    self.handle_message(&message, src);
                 }
-                Err(e) => {
-                    // Handle timeout as normal (not an error)
+                Err(e)
                     if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut
-                    {
-                        // Check if we should send a periodic Hello message
-                        if last_hello.elapsed() >= hello_interval {
-                            if let Err(e) = self.send_hello() {
-                                eprintln!("Failed to send periodic Hello message: {e}");
-                            }
-                            last_hello = std::time::Instant::now();
-                        }
-
-                        // Periodic status update every ~10 seconds
-                        if message_count.is_multiple_of(10) && message_count > 0 && self.debug {
-                            println!(
-                                "WS-Discovery: Processed {message_count} messages, still listening..."
-                            );
-                        }
-                        continue;
-                    } else {
-                        eprintln!("Error receiving WS-Discovery message: {e}");
-                        break;
-                    }
+                        || e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => {
+                    warn!(error = %e, "error receiving WS-Discovery message");
+                    std::thread::sleep(Duration::from_millis(200));
                 }
             }
-        }
 
-        Ok(())
-    }
-
-    /// Handles incoming WS-Discovery messages
-    ///
-    /// # Arguments
-    /// * `message` - The received XML message
-    /// * `src` - Source address of the message
-    ///
-    /// # Returns
-    /// * `Result<(), Box<dyn std::error::Error>>` - Ok if handled successfully, Err on error
-    fn handle_message(
-        &self,
-        message: &str,
-        src: SocketAddr,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Log first line of message for debugging (avoid logging full XML for brevity)
-        if self.debug {
-            let first_line = message.lines().next().unwrap_or("").trim();
-            if !first_line.is_empty() {
-                println!("Received WS-Discovery message from {src}: {first_line}");
+            if last_hello.elapsed() >= HELLO_INTERVAL {
+                if let Err(e) = self.send_hello() {
+                    warn!(error = %e, "failed to send periodic Hello");
+                }
+                last_hello = Instant::now();
             }
         }
 
-        if is_probe_request(message) {
-            if self.debug {
-                println!("Detected Probe request from {src}, sending ProbeMatch response");
-            }
-            let message_id = extract_message_id(message);
-            self.send_probe_match(src, &message_id)?;
-        } else if self.debug {
-            println!("Received non-probe message from {src} (ignoring)");
-        }
-
-        Ok(())
-    }
-
-    /// Sends a Hello announcement message to the multicast group
-    ///
-    /// # Returns
-    /// * `Result<(), Box<dyn std::error::Error>>` - Ok if sent successfully, Err on error
-    fn send_hello(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let message_id = generate_uuid();
-        let hello_message = create_hello_message(&self.device_info, &message_id);
-
-        let multicast_addr: SocketAddr = WS_DISCOVERY_MULTICAST_ADDR
-            .parse()
-            .map_err(|e| format!("Invalid multicast address: {e}"))?;
-
-        println!("Sending Hello message to {multicast_addr}");
-        if self.debug {
-            println!("Hello message details:");
-            println!("  - Device Name: {}", self.device_info.friendly_name);
-            println!("  - Types: {}", self.device_info.types);
-            println!("  - XAddrs: {}", self.device_info.xaddrs);
-            println!("  - Scopes: {}", self.device_info.scopes);
-        }
-
-        self.socket
-            .send_to(hello_message.as_bytes(), multicast_addr)
-            .map_err(|e| format!("Failed to send Hello message: {e}"))?;
-
-        println!("Hello message sent successfully (MessageID: {message_id})");
-        Ok(())
-    }
-
-    /// Sends a Bye announcement message to the multicast group
-    ///
-    /// This method is typically called when the device is shutting down.
-    ///
-    /// # Returns
-    /// * `Result<(), Box<dyn std::error::Error>>` - Ok if sent successfully, Err on error
-    pub fn send_bye(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let message_id = generate_uuid();
-        let bye_message = create_bye_message(&self.device_info, &message_id);
-
-        let multicast_addr: SocketAddr = WS_DISCOVERY_MULTICAST_ADDR
-            .parse()
-            .map_err(|e| format!("Invalid multicast address: {e}"))?;
-
-        self.socket
-            .send_to(bye_message.as_bytes(), multicast_addr)
-            .map_err(|e| format!("Failed to send Bye message: {e}"))?;
-
-        println!("Sent Bye message");
-        Ok(())
-    }
-
-    /// Sends a ProbeMatch response to a specific client
-    ///
-    /// # Arguments
-    /// * `dest` - Destination address to send the response to
-    /// * `relates_to` - MessageID from the original Probe request
-    ///
-    /// # Returns
-    /// * `Result<(), Box<dyn std::error::Error>>` - Ok if sent successfully, Err on error
-    fn send_probe_match(
-        &self,
-        dest: SocketAddr,
-        relates_to: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let message_id = generate_uuid();
-        let probe_match = create_probe_match_message(&self.device_info, &message_id, relates_to);
-
-        if self.debug {
-            println!("Sending ProbeMatch response to {dest}");
-            println!("  - RelatesTo: {relates_to}");
-            println!("  - MessageID: {message_id}");
-            println!("  - XAddrs: {}", self.device_info.xaddrs);
-        }
-
-        self.socket
-            .send_to(probe_match.as_bytes(), dest)
-            .map_err(|e| format!("Failed to send ProbeMatch to {dest}: {e}"))?;
-
-        if self.debug {
-            println!("ProbeMatch sent successfully to {dest}");
-        }
-        Ok(())
-    }
-}
-
-/// Implement Drop to send a Bye message when the server is dropped
-impl Drop for WSDiscoveryServer {
-    fn drop(&mut self) {
         if let Err(e) = self.send_bye() {
-            eprintln!("Failed to send Bye message on drop: {e}");
+            warn!(error = %e, "failed to send Bye");
         }
     }
-}
 
-// --- Helper functions (pure logic, testable) ---
-
-fn is_probe_request(message: &str) -> bool {
-    // Enhanced probe detection - check for various probe patterns
-    let is_probe_request = message.contains("Probe")
-        && (message.contains(WS_DISCOVERY_NAMESPACE) || message.contains("discovery"))
-        && (message.contains("ProbeType")
-            || message.contains("Types")
-            || !message.contains("ProbeMatch"));
-
-    // Also check for specific ONVIF probe patterns
-    let is_onvif_probe = message.contains("NetworkVideoTransmitter")
-        || message.contains("tdn:")
-        || message.contains("onvif://www.onvif.org");
-
-    is_probe_request || is_onvif_probe
-}
-
-fn extract_message_id(message: &str) -> String {
-    // List of possible MessageID patterns to try
-    let patterns = [
-        ("<a:MessageID>", "</a:MessageID>"),
-        ("<wsa:MessageID>", "</wsa:MessageID>"),
-        ("<MessageID>", "</MessageID>"),
-        ("<soap:MessageID>", "</soap:MessageID>"),
-        ("<s:MessageID>", "</s:MessageID>"),
-    ];
-
-    for (start_tag, end_tag) in patterns.iter() {
-        if let Some(start) = message.find(start_tag) {
-            if let Some(end) = message[start..].find(end_tag) {
-                let id_start = start + start_tag.len();
-                let id_end = start + end;
-                let message_id = message[id_start..id_end].trim();
-
-                // Clean up the message ID - remove urn:uuid: prefix if present
-                if let Some(stripped) = message_id.strip_prefix("urn:uuid:") {
-                    return stripped.to_string();
-                } else if !message_id.is_empty() {
-                    return message_id.to_string();
+    fn handle_message(&self, message: &str, src: SocketAddr) {
+        match classify_message(message) {
+            IncomingMessage::Probe { message_id, types } => {
+                if !types_match(&types) {
+                    trace!(%src, ?types, "ignoring Probe for other device types");
+                    return;
                 }
+                debug!(%src, "answering Probe");
+                if let Err(e) = self.send_probe_match(src, message_id.as_deref()) {
+                    warn!(%src, error = %e, "failed to send ProbeMatch");
+                }
+            }
+            IncomingMessage::Other(action) => {
+                trace!(%src, action, "ignoring non-Probe message");
             }
         }
     }
 
-    // Fallback to generating a new UUID
-    println!("Could not extract MessageID from probe request, generating new one");
-    generate_uuid()
+    fn next_message_number(&self) -> u32 {
+        self.message_number.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    fn multicast_target(&self) -> SocketAddr {
+        SocketAddr::V4(SocketAddrV4::new(
+            WS_DISCOVERY_MULTICAST_GROUP,
+            WS_DISCOVERY_PORT,
+        ))
+    }
+
+    fn send_hello(&self) -> std::io::Result<()> {
+        let message = build_hello(
+            &self.device_info,
+            self.instance_id,
+            self.next_message_number(),
+        );
+        self.socket
+            .send_to(message.as_bytes(), self.multicast_target())?;
+        debug!("sent Hello");
+        Ok(())
+    }
+
+    /// Announces that this device is leaving the network.
+    pub fn send_bye(&self) -> std::io::Result<()> {
+        let message = build_bye(
+            &self.device_info,
+            self.instance_id,
+            self.next_message_number(),
+        );
+        self.socket
+            .send_to(message.as_bytes(), self.multicast_target())?;
+        info!("sent Bye");
+        Ok(())
+    }
+
+    fn send_probe_match(&self, dest: SocketAddr, relates_to: Option<&str>) -> std::io::Result<()> {
+        let message = build_probe_match(
+            &self.device_info,
+            self.instance_id,
+            self.next_message_number(),
+            relates_to,
+        );
+        self.socket.send_to(message.as_bytes(), dest)?;
+        Ok(())
+    }
 }
 
-fn create_hello_message(device_info: &DeviceInfo, message_id: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="{}" xmlns:wsd="{}">
-<soap:Header>
-<wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Hello</wsa:Action>
-<wsa:MessageID>urn:uuid:{}</wsa:MessageID>
-<wsa:To>urn:schemas-xmlsoap-org:ws:2005:04:discovery</wsa:To>
-</soap:Header>
-<soap:Body>
-<wsd:Hello>
-<wsa:EndpointReference>
-<wsa:Address>{}</wsa:Address>
-</wsa:EndpointReference>
-<wsd:Types>{}</wsd:Types>
-<wsd:Scopes>{}</wsd:Scopes>
-<wsd:XAddrs>{}</wsd:XAddrs>
-<wsd:MetadataVersion>1</wsd:MetadataVersion>
-</wsd:Hello>
-</soap:Body>
-</soap:Envelope>"#,
-        WS_ADDRESSING_NAMESPACE,
-        WS_DISCOVERY_NAMESPACE,
-        message_id,
-        device_info.endpoint_reference,
-        device_info.types,
-        device_info.scopes,
-        device_info.xaddrs
-    )
+/// Returns true if the probe asked for no particular type or for an ONVIF
+/// network video transmitter / device.
+fn types_match(types: &[String]) -> bool {
+    types.is_empty()
+        || types.iter().any(|t| {
+            let local = t.rsplit(':').next().unwrap_or(t);
+            local == "NetworkVideoTransmitter" || local == "Device"
+        })
 }
 
-fn create_bye_message(device_info: &DeviceInfo, message_id: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="{}" xmlns:wsd="{}">
-<soap:Header>
-<wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Bye</wsa:Action>
-<wsa:MessageID>urn:uuid:{}</wsa:MessageID>
-<wsa:To>urn:schemas-xmlsoap-org:ws:2005:04:discovery</wsa:To>
-</soap:Header>
-<soap:Body>
-<wsd:Bye>
-<wsa:EndpointReference>
-<wsa:Address>{}</wsa:Address>
-</wsa:EndpointReference>
-<wsd:Types>{}</wsd:Types>
-<wsd:Scopes>{}</wsd:Scopes>
-<wsd:XAddrs>{}</wsd:XAddrs>
-<wsd:MetadataVersion>1</wsd:MetadataVersion>
-</wsd:Bye>
-</soap:Body>
-</soap:Envelope>"#,
-        WS_ADDRESSING_NAMESPACE,
-        WS_DISCOVERY_NAMESPACE,
-        message_id,
-        device_info.endpoint_reference,
-        device_info.types,
-        device_info.scopes,
-        device_info.xaddrs
-    )
+/// Classifies an incoming message by its WS-Addressing Action header.
+pub fn classify_message(message: &str) -> IncomingMessage {
+    let Ok(doc) = Document::parse(message) else {
+        return IncomingMessage::Other("<malformed>".to_string());
+    };
+
+    let action = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "Action")
+        .and_then(|n| n.text())
+        .map(str::trim)
+        .unwrap_or("");
+
+    let is_probe = action.ends_with("/Probe")
+        && (action.starts_with(WS_DISCOVERY_NAMESPACE)
+            || action.starts_with(WS_DISCOVERY_11_NAMESPACE));
+    if !is_probe {
+        return IncomingMessage::Other(action.to_string());
+    }
+
+    let message_id = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "MessageID")
+        .and_then(|n| n.text())
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+
+    let types = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "Probe")
+        .and_then(|probe| {
+            probe
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "Types")
+        })
+        .and_then(|n| n.text())
+        .map(|t| t.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default();
+
+    IncomingMessage::Probe { message_id, types }
 }
 
-fn create_probe_match_message(
-    device_info: &DeviceInfo,
-    message_id: &str,
-    relates_to: &str,
+fn envelope(
+    action: &str,
+    relates_to: Option<&str>,
+    to: &str,
+    instance_id: u64,
+    message_number: u32,
+    body: &str,
 ) -> String {
+    let relates_to = relates_to
+        .map(|r| format!("\n<wsa:RelatesTo>{}</wsa:RelatesTo>", xml_escape(r)))
+        .unwrap_or_default();
     format!(
-        r#"<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="{}" xmlns:wsd="{}">
-<soap:Header>
-<wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/ProbeMatches</wsa:Action>
-<wsa:MessageID>urn:uuid:{}</wsa:MessageID>
-<wsa:RelatesTo>{}</wsa:RelatesTo>
-<wsa:To>http://www.w3.org/2005/08/addressing/anonymous</wsa:To>
-</soap:Header>
-<soap:Body>
-<wsd:ProbeMatches>
-<wsd:ProbeMatch>
-<wsa:EndpointReference>
-<wsa:Address>{}</wsa:Address>
-</wsa:EndpointReference>
-<wsd:Types>{}</wsd:Types>
-<wsd:Scopes>{}</wsd:Scopes>
-<wsd:XAddrs>{}</wsd:XAddrs>
-<wsd:MetadataVersion>1</wsd:MetadataVersion>
-</wsd:ProbeMatch>
-</wsd:ProbeMatches>
-</soap:Body>
-</soap:Envelope>"#,
-        WS_ADDRESSING_NAMESPACE,
-        WS_DISCOVERY_NAMESPACE,
-        message_id,
-        relates_to,
-        device_info.endpoint_reference,
-        device_info.types,
-        device_info.scopes,
-        device_info.xaddrs
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:wsa=\"{WS_ADDRESSING_NAMESPACE}\" xmlns:wsd=\"{WS_DISCOVERY_NAMESPACE}\" xmlns:dn=\"{ONVIF_NETWORK_NAMESPACE}\">\n<soap:Header>\n<wsa:Action>{WS_DISCOVERY_NAMESPACE}/{action}</wsa:Action>\n<wsa:MessageID>urn:uuid:{}</wsa:MessageID>{relates_to}\n<wsa:To>{to}</wsa:To>\n<wsd:AppSequence InstanceId=\"{instance_id}\" MessageNumber=\"{message_number}\"/>\n</soap:Header>\n<soap:Body>\n{body}\n</soap:Body>\n</soap:Envelope>",
+        Uuid::new_v4()
     )
 }
 
-fn generate_uuid() -> String {
-    Uuid::new_v4().to_string()
+fn endpoint_block(device_info: &DeviceInfo) -> String {
+    format!(
+        "<wsa:EndpointReference>\n<wsa:Address>{}</wsa:Address>\n</wsa:EndpointReference>\n<wsd:Types>dn:NetworkVideoTransmitter</wsd:Types>\n<wsd:Scopes>{}</wsd:Scopes>\n<wsd:XAddrs>{}</wsd:XAddrs>\n<wsd:MetadataVersion>1</wsd:MetadataVersion>",
+        xml_escape(&device_info.endpoint_reference),
+        xml_escape(&device_info.scopes),
+        xml_escape(&device_info.xaddrs)
+    )
+}
+
+const DISCOVERY_TO: &str = "urn:schemas-xmlsoap-org:ws:2005:04:discovery";
+const ANONYMOUS_TO: &str = "http://www.w3.org/2005/08/addressing/anonymous";
+
+/// Builds a multicast Hello announcement.
+pub fn build_hello(device_info: &DeviceInfo, instance_id: u64, message_number: u32) -> String {
+    let body = format!("<wsd:Hello>\n{}\n</wsd:Hello>", endpoint_block(device_info));
+    envelope(
+        "Hello",
+        None,
+        DISCOVERY_TO,
+        instance_id,
+        message_number,
+        &body,
+    )
+}
+
+/// Builds a multicast Bye announcement.
+pub fn build_bye(device_info: &DeviceInfo, instance_id: u64, message_number: u32) -> String {
+    let body = format!(
+        "<wsd:Bye>\n<wsa:EndpointReference>\n<wsa:Address>{}</wsa:Address>\n</wsa:EndpointReference>\n</wsd:Bye>",
+        xml_escape(&device_info.endpoint_reference)
+    );
+    envelope(
+        "Bye",
+        None,
+        DISCOVERY_TO,
+        instance_id,
+        message_number,
+        &body,
+    )
+}
+
+/// Builds a unicast ProbeMatches reply. `relates_to` must be the probe's
+/// MessageID exactly as received.
+pub fn build_probe_match(
+    device_info: &DeviceInfo,
+    instance_id: u64,
+    message_number: u32,
+    relates_to: Option<&str>,
+) -> String {
+    let body = format!(
+        "<wsd:ProbeMatches>\n<wsd:ProbeMatch>\n{}\n</wsd:ProbeMatch>\n</wsd:ProbeMatches>",
+        endpoint_block(device_info)
+    );
+    envelope(
+        "ProbeMatches",
+        relates_to,
+        ANONYMOUS_TO,
+        instance_id,
+        message_number,
+        &body,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_is_probe_request() {
-        let valid_probe = format!(
-            r#"<soap:Envelope xmlns:d="{}"><soap:Body><d:Probe><d:Types>tdn:NetworkVideoTransmitter</d:Types></d:Probe></soap:Body></soap:Envelope>"#,
-            WS_DISCOVERY_NAMESPACE
-        );
-        assert!(is_probe_request(&valid_probe));
+    fn device() -> DeviceInfo {
+        DeviceInfo {
+            endpoint_reference: "urn:uuid:11111111-2222-3333-4444-555555555555".to_string(),
+            scopes: "onvif://www.onvif.org/type/NetworkVideoTransmitter onvif://www.onvif.org/name/Test%20Cam".to_string(),
+            xaddrs: "http://192.0.2.10:8080/onvif/device_service".to_string(),
+        }
+    }
 
-        let non_probe = "Just some random text";
-        assert!(!is_probe_request(non_probe));
+    const PROBE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope" xmlns:w="http://schemas.xmlsoap.org/ws/2005/08/addressing" xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:dn="http://www.onvif.org/ver10/network/wsdl">
+<e:Header><w:MessageID>uuid:84ede3de-7dec-11d0-c360-f01234567890</w:MessageID><w:To e:mustUnderstand="true">urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To><w:Action a:mustUnderstand="true" xmlns:a="http://www.w3.org/2003/05/soap-envelope">http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action></e:Header>
+<e:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></e:Body>
+</e:Envelope>"#;
+
+    #[test]
+    fn classifies_probe_and_keeps_message_id_verbatim() {
+        match classify_message(PROBE) {
+            IncomingMessage::Probe { message_id, types } => {
+                assert_eq!(
+                    message_id.as_deref(),
+                    Some("uuid:84ede3de-7dec-11d0-c360-f01234567890")
+                );
+                assert_eq!(types, vec!["dn:NetworkVideoTransmitter".to_string()]);
+                assert!(types_match(&types));
+            }
+            other => panic!("expected probe, got {other:?}"),
+        }
     }
 
     #[test]
-    fn test_extract_message_id() {
-        let msg_with_id =
-            r#"<soap:Header><wsa:MessageID>urn:uuid:12345-67890</wsa:MessageID></soap:Header>"#;
-        assert_eq!(extract_message_id(msg_with_id), "12345-67890");
-
-        let msg_without_id = r#"<soap:Header><wsa:To>somewhere</wsa:To></soap:Header>"#;
-        // Should generate a new UUID (length 36)
-        assert_eq!(extract_message_id(msg_without_id).len(), 36);
+    fn own_hello_and_probe_match_are_not_probes() {
+        let d = device();
+        for msg in [
+            build_hello(&d, 1, 1),
+            build_bye(&d, 1, 2),
+            build_probe_match(&d, 1, 3, Some("urn:uuid:x")),
+        ] {
+            assert!(
+                matches!(classify_message(&msg), IncomingMessage::Other(_)),
+                "{msg}"
+            );
+        }
+        assert!(matches!(
+            classify_message("garbage"),
+            IncomingMessage::Other(_)
+        ));
+        // Mentions of ONVIF strings without a Probe action are ignored.
+        let hello_like = r#"<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"><e:Header><Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Hello</Action></e:Header><e:Body><Hello><Types>tdn:NetworkVideoTransmitter</Types><Scopes>onvif://www.onvif.org/name/x</Scopes></Hello></e:Body></e:Envelope>"#;
+        assert!(matches!(
+            classify_message(hello_like),
+            IncomingMessage::Other(_)
+        ));
     }
 
     #[test]
-    fn test_create_hello_message() {
-        let device_info = DeviceInfo {
-            endpoint_reference: "urn:uuid:test-endpoint".to_string(),
-            types: "tdn:TestDevice".to_string(),
-            scopes: "onvif://www.onvif.org/test".to_string(),
-            xaddrs: "http://127.0.0.1:8080/onvif".to_string(),
-            manufacturer: "Test Mfg".to_string(),
-            model_name: "Test Model".to_string(),
-            friendly_name: "Test Device".to_string(),
-            firmware_version: "1.0".to_string(),
-            serial_number: "12345".to_string(),
-        };
-
-        let hello = create_hello_message(&device_info, "test-message-id");
-        assert!(hello.contains("Hello"));
-        assert!(hello.contains("urn:uuid:test-message-id"));
-        assert!(hello.contains("urn:uuid:test-endpoint"));
-        assert!(hello.contains("tdn:TestDevice"));
+    fn probe_without_types_or_with_device_type_matches() {
+        let no_types = r#"<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"><e:Header><Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</Action></e:Header><e:Body><Probe/></e:Body></e:Envelope>"#;
+        match classify_message(no_types) {
+            IncomingMessage::Probe { message_id, types } => {
+                assert!(message_id.is_none());
+                assert!(types.is_empty());
+                assert!(types_match(&types));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(types_match(&["tds:Device".to_string()]));
+        assert!(!types_match(&["wsdp:Printer".to_string()]));
     }
 
     #[test]
-    fn test_create_bye_message() {
-        let device_info = DeviceInfo {
-            endpoint_reference: "urn:uuid:test-endpoint".to_string(),
-            types: "tdn:TestDevice".to_string(),
-            scopes: "onvif://www.onvif.org/test".to_string(),
-            xaddrs: "http://127.0.0.1:8080/onvif".to_string(),
-            manufacturer: "Test Mfg".to_string(),
-            model_name: "Test Model".to_string(),
-            friendly_name: "Test Device".to_string(),
-            firmware_version: "1.0".to_string(),
-            serial_number: "12345".to_string(),
-        };
-
-        let bye = create_bye_message(&device_info, "test-message-id");
-        assert!(bye.contains("Bye"));
-        assert!(bye.contains("urn:uuid:test-message-id"));
-        assert!(bye.contains("urn:uuid:test-endpoint"));
+    fn probe_match_relates_to_original_message_id() {
+        let msg = build_probe_match(&device(), 7, 3, Some("uuid:abc-123"));
+        let doc = Document::parse(&msg).expect("well-formed");
+        let relates = doc
+            .descendants()
+            .find(|n| n.tag_name().name() == "RelatesTo")
+            .and_then(|n| n.text())
+            .unwrap();
+        assert_eq!(relates, "uuid:abc-123");
+        let app_seq = doc
+            .descendants()
+            .find(|n| n.tag_name().name() == "AppSequence")
+            .unwrap();
+        assert_eq!(app_seq.attribute("InstanceId"), Some("7"));
+        assert_eq!(app_seq.attribute("MessageNumber"), Some("3"));
+        assert!(msg.contains("ProbeMatches"));
+        assert!(msg.contains("http://192.0.2.10:8080/onvif/device_service"));
     }
 
     #[test]
-    fn test_create_probe_match_message() {
-        let device_info = DeviceInfo {
-            endpoint_reference: "urn:uuid:test-endpoint".to_string(),
-            types: "tdn:TestDevice".to_string(),
-            scopes: "onvif://www.onvif.org/test".to_string(),
-            xaddrs: "http://127.0.0.1:8080/onvif".to_string(),
-            manufacturer: "Test Mfg".to_string(),
-            model_name: "Test Model".to_string(),
-            friendly_name: "Test Device".to_string(),
-            firmware_version: "1.0".to_string(),
-            serial_number: "12345".to_string(),
-        };
-
-        let probe_match =
-            create_probe_match_message(&device_info, "test-message-id", "relates-to-id");
-        assert!(probe_match.contains("ProbeMatches"));
-        assert!(probe_match.contains("urn:uuid:test-message-id"));
-        assert!(probe_match.contains("relates-to-id"));
-        assert!(probe_match.contains("urn:uuid:test-endpoint"));
-    }
-
-    #[test]
-    fn test_generate_uuid() {
-        let uuid1 = generate_uuid();
-        let uuid2 = generate_uuid();
-        assert_eq!(uuid1.len(), 36);
-        assert_ne!(uuid1, uuid2);
+    fn announcements_are_well_formed_and_escaped() {
+        let mut d = device();
+        d.scopes.push_str(" onvif://www.onvif.org/hardware/A&B");
+        for msg in [build_hello(&d, 1, 1), build_bye(&d, 1, 2)] {
+            let doc = Document::parse(&msg).unwrap_or_else(|e| panic!("{e}: {msg}"));
+            assert!(doc.descendants().any(|n| n.tag_name().name() == "Action"));
+        }
+        assert!(build_hello(&d, 1, 1).contains("A&amp;B"));
     }
 }
