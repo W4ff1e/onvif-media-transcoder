@@ -1,31 +1,196 @@
+//! End-to-end tests over a real TCP socket against the ONVIF HTTP service.
+
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use clap::Parser;
 use onvif_media_transcoder::config::Config;
-use onvif_media_transcoder::ws_discovery::{DeviceInfo, WSDiscoveryServer};
+use onvif_media_transcoder::onvif::{OnvifService, ServerHandle};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::sync::Arc;
+use std::time::Duration;
 
-#[test]
-fn test_config_loading_defaults() {
-    // We can't easily test Config::from_args() in a unit test because it reads actual CLI args.
-    // But we can test that the struct exists and we can create it if we had a constructor.
-    // Since Config fields are private and there's no public constructor other than load(),
-    // we might need to make fields public or add a constructor for testing.
-    // For now, let's just verify we can import it.
+fn start_server() -> (ServerHandle, SocketAddr) {
+    let config = Config::try_parse_from([
+        "test",
+        "--rtsp-stream-url",
+        "rtsp://127.0.0.1:8554/stream",
+        "--onvif-port",
+        "0",
+    ])
+    .expect("config parses");
+    let service = Arc::new(OnvifService::new(config));
+    let handle = service.serve("127.0.0.1:0", 2).expect("server starts");
+    let addr = handle.local_addr().expect("bound address");
+    (handle, addr)
+}
+
+/// Sends raw bytes in `chunks` with a pause between them and returns the
+/// full HTTP response.
+fn raw_request(addr: SocketAddr, chunks: &[&[u8]], pause: Duration) -> String {
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    for (i, chunk) in chunks.iter().enumerate() {
+        stream.write_all(chunk).unwrap();
+        stream.flush().unwrap();
+        if i + 1 < chunks.len() {
+            std::thread::sleep(pause);
+        }
+    }
+    // Ask the server to close after this exchange so read_to_end returns.
+    let mut response = Vec::new();
+    let _ = stream.read_to_end(&mut response);
+    String::from_utf8_lossy(&response).into_owned()
+}
+
+fn post(addr: SocketAddr, path: &str, headers: &str, body: &str) -> String {
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\nContent-Type: application/soap+xml\r\nContent-Length: {}\r\n{headers}\r\n{body}",
+        body.len()
+    );
+    raw_request(addr, &[request.as_bytes()], Duration::ZERO)
+}
+
+fn envelope(operation: &str) -> String {
+    format!(
+        r#"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><{operation} xmlns="http://www.onvif.org/ver10/media/wsdl"/></s:Body></s:Envelope>"#
+    )
+}
+
+fn status_line(response: &str) -> &str {
+    response.lines().next().unwrap_or("")
 }
 
 #[test]
-fn test_device_info_creation() {
-    let device_info = DeviceInfo {
-        endpoint_reference: "urn:uuid:test".to_string(),
-        types: "tdn:Test".to_string(),
-        scopes: "onvif://test".to_string(),
-        xaddrs: "http://localhost".to_string(),
-        manufacturer: "Test".to_string(),
-        model_name: "Test".to_string(),
-        friendly_name: "Test".to_string(),
-        firmware_version: "1.0".to_string(),
-        serial_number: "123".to_string(),
-    };
-
-    assert_eq!(device_info.manufacturer, "Test");
+fn get_capabilities_over_tcp() {
+    let (server, addr) = start_server();
+    let response = post(
+        addr,
+        "/onvif/device_service",
+        "",
+        &envelope("GetCapabilities"),
+    );
+    assert!(status_line(&response).contains("200"), "{response}");
+    assert!(response.contains("GetCapabilitiesResponse"));
+    assert!(response.contains("Content-Type: application/soap+xml"));
+    server.shutdown();
 }
 
-// We can't easily test WSDiscoveryServer::new without network permissions or mocking,
-// but we can verify the type exists.
+#[test]
+fn headers_and_body_in_separate_writes_are_handled() {
+    let (server, addr) = start_server();
+    let body = envelope("GetCapabilities");
+    let head = format!(
+        "POST /onvif/device_service HTTP/1.1\r\nHost: test\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    );
+    let response = raw_request(
+        addr,
+        &[head.as_bytes(), body.as_bytes()],
+        Duration::from_millis(300),
+    );
+    assert!(status_line(&response).contains("200"), "{response}");
+    assert!(response.contains("GetCapabilitiesResponse"));
+    server.shutdown();
+}
+
+#[test]
+fn large_bodies_are_read_completely() {
+    let (server, addr) = start_server();
+    let padding = format!("<!--{}-->", "x".repeat(20_000));
+    let body = format!(
+        r#"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">{padding}<s:Body><GetCapabilities/></s:Body></s:Envelope>"#
+    );
+    let response = post(addr, "/onvif/device_service", "", &body);
+    assert!(
+        status_line(&response).contains("200"),
+        "{}",
+        status_line(&response)
+    );
+    server.shutdown();
+}
+
+#[test]
+fn oversized_bodies_are_rejected() {
+    let (server, addr) = start_server();
+    let body = "x".repeat(onvif_media_transcoder::onvif::MAX_BODY_BYTES + 10);
+    let response = post(addr, "/onvif/device_service", "", &body);
+    assert!(
+        status_line(&response).contains("413"),
+        "{}",
+        status_line(&response)
+    );
+    server.shutdown();
+}
+
+#[test]
+fn protected_operation_challenge_then_basic_auth() {
+    let (server, addr) = start_server();
+    let body = envelope("GetProfiles");
+
+    let response = post(addr, "/onvif/media_service", "", &body);
+    assert!(status_line(&response).contains("401"), "{response}");
+    assert!(response.contains("WWW-Authenticate: Digest"));
+    assert!(response.contains("WWW-Authenticate: Basic"));
+    assert!(response.contains("ter:NotAuthorized"));
+
+    let auth = format!(
+        "Authorization: Basic {}\r\n",
+        BASE64.encode("admin:onvif-rust")
+    );
+    let response = post(addr, "/onvif/media_service", &auth, &body);
+    assert!(status_line(&response).contains("200"), "{response}");
+    assert!(response.contains("GetProfilesResponse"));
+    server.shutdown();
+}
+
+#[test]
+fn digest_auth_round_trip() {
+    let (server, addr) = start_server();
+    let body = envelope("GetProfiles");
+    let path = "/onvif/media_service";
+
+    let challenge = post(addr, path, "", &body);
+    let nonce = challenge
+        .lines()
+        .find(|l| l.starts_with("WWW-Authenticate: Digest"))
+        .and_then(|l| l.split("nonce=\"").nth(1))
+        .and_then(|l| l.split('"').next())
+        .expect("nonce in challenge")
+        .to_string();
+
+    let md5 = |s: &str| format!("{:x}", md5::compute(s.as_bytes()));
+    let ha1 = md5("admin:ONVIF:onvif-rust");
+    let ha2 = md5(&format!("POST:{path}"));
+    let response_hash = md5(&format!("{ha1}:{nonce}:00000001:cafe:auth:{ha2}"));
+    let auth = format!(
+        "Authorization: Digest username=\"admin\", realm=\"ONVIF\", nonce=\"{nonce}\", uri=\"{path}\", qop=auth, nc=00000001, cnonce=\"cafe\", response=\"{response_hash}\", algorithm=MD5\r\n"
+    );
+    let response = post(addr, path, &auth, &body);
+    assert!(status_line(&response).contains("200"), "{response}");
+
+    // Same Authorization header again is a replay and must be refused.
+    let response = post(addr, path, &auth, &body);
+    assert!(status_line(&response).contains("401"), "{response}");
+    server.shutdown();
+}
+
+#[test]
+fn health_endpoint_and_snapshot_auth() {
+    let (server, addr) = start_server();
+    let response = raw_request(
+        addr,
+        &[b"GET / HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"],
+        Duration::ZERO,
+    );
+    assert!(status_line(&response).contains("200"), "{response}");
+
+    let response = raw_request(
+        addr,
+        &[b"GET /snapshot.jpg HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"],
+        Duration::ZERO,
+    );
+    assert!(status_line(&response).contains("401"), "{response}");
+    server.shutdown();
+}

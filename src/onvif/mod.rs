@@ -1,778 +1,540 @@
-pub mod endpoints;
+//! ONVIF SOAP service: HTTP transport, authentication and operation dispatch.
+
+pub mod auth;
 pub mod responses;
+pub mod snapshot;
 pub mod soap;
 
 use crate::config::Config;
-use base64::{engine::general_purpose, Engine as _};
-use endpoints::UNSUPPORTED_ENDPOINTS;
-use responses::*;
-use sha1::Digest;
-use std::io::prelude::*;
-use std::net::TcpStream;
+use auth::{AuthResult, Authenticator};
+use soap::{soap_fault, FaultCode, SoapRequest};
+use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
+use tracing::{debug, info, warn};
 
-pub fn handle_onvif_request(
-    mut stream: TcpStream,
-    config: &Config,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Set socket timeouts
-    let timeout = std::time::Duration::from_secs(30);
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
+/// Largest accepted request body. ONVIF requests are a few kilobytes at most.
+pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 
-    // Get client info for debugging
-    let client_addr = stream
-        .peer_addr()
-        .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
+const SOAP_CONTENT_TYPE: &str = "application/soap+xml; charset=utf-8";
+const TEXT_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 
-    println!("New connection from: {client_addr}");
-    let mut buffer = [0; 4096];
+/// Operations that ONVIF classifies as PRE_AUTH and that may be called
+/// without credentials.
+const PUBLIC_OPERATIONS: &[&str] = &[
+    "GetCapabilities",
+    "GetServices",
+    "GetServiceCapabilities",
+    "GetSystemDateAndTime",
+    "GetWsdlUrl",
+    "GetHostname",
+    "GetEndpointReference",
+];
 
-    let size = stream
-        .read(&mut buffer)
-        .map_err(|e| format!("Failed to read from stream: {e}"))?;
+/// A fully built HTTP response, independent of the transport library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnvifResponse {
+    pub status: u16,
+    pub content_type: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
 
-    if size == 0 {
-        println!("  Connection closed by client (0 bytes read)");
-        return Ok(());
-    }
-
-    let request = String::from_utf8_lossy(&buffer[..size]);
-    let first_line = request.lines().next().unwrap_or("Unknown");
-    println!("Received ONVIF request: {first_line}");
-
-    // Check for authentication
-    let requires_auth = !is_public_endpoint(&request);
-    println!("  Authentication required: {requires_auth}");
-
-    if requires_auth && !is_authenticated(&request, &config.onvif_username, &config.onvif_password)
-    {
-        println!("  Authentication failed - sending 401 response");
-
-        // Debug dump for authentication failures
-        dump_headers(&request, size, "AUTH_FAILED", config.debug);
-
-        send_auth_required_response(&mut stream)?;
-        return Ok(());
-    } else if requires_auth {
-        println!("  Authentication successful");
-    } else {
-        println!("  Public endpoint - no authentication required");
-    }
-
-    // Handle ONVIF endpoints
-    if request.contains("GetCapabilities") {
-        println!("Handling supported endpoint: GetCapabilities");
-        dump_headers(&request, size, "GetCapabilities", config.debug);
-        send_capabilities_response(&mut stream, &config.container_ip, &config.onvif_port)?;
-    } else if request.contains("GetServices") {
-        println!("Handling supported endpoint: GetServices");
-        dump_headers(&request, size, "GetServices", config.debug);
-        send_services_response(&mut stream, &config.container_ip, &config.onvif_port)?;
-    } else if request.contains("GetSystemDateAndTime") {
-        println!("Handling supported endpoint: GetSystemDateAndTime");
-        dump_headers(&request, size, "GetSystemDateAndTime", config.debug);
-        send_system_date_time_response(&mut stream)?;
-    } else if request.contains("GetProfiles") {
-        println!("Handling supported endpoint: GetProfiles");
-        dump_headers(&request, size, "GetProfiles", config.debug);
-        send_profiles_response(&mut stream, &config.rtsp_stream_url)?;
-    } else if request.contains("GetStreamUri") {
-        println!("Handling supported endpoint: GetStreamUri");
-        dump_headers(&request, size, "GetStreamUri", config.debug);
-        send_stream_uri_response(&mut stream, &config.rtsp_stream_url)?;
-    } else if request.contains("GetSnapshotUri") {
-        println!("Handling supported endpoint: GetSnapshotUri");
-        dump_headers(&request, size, "GetSnapshotUri", config.debug);
-        send_snapshot_uri_response(&mut stream, &config.container_ip, &config.onvif_port)?;
-    } else if request.contains("GetDeviceInformation") {
-        println!("Handling supported endpoint: GetDeviceInformation");
-        dump_headers(&request, size, "GetDeviceInformation", config.debug);
-        send_device_info_response(&mut stream, &config.device_name)?;
-    } else if request.contains("GetVideoSources") {
-        println!("Handling supported endpoint: GetVideoSources");
-        dump_headers(&request, size, "GetVideoSources", config.debug);
-        send_video_sources_response(&mut stream)?;
-    } else if request.contains("GetVideoSourceConfigurations") {
-        println!("Handling supported endpoint: GetVideoSourceConfigurations");
-        dump_headers(&request, size, "GetVideoSourceConfigurations", config.debug);
-        send_video_source_configurations_response(&mut stream)?;
-    } else if request.contains("GetVideoEncoderConfigurations") {
-        println!("Handling supported endpoint: GetVideoEncoderConfigurations");
-        dump_headers(
-            &request,
-            size,
-            "GetVideoEncoderConfigurations",
-            config.debug,
-        );
-        send_video_encoder_configurations_response(&mut stream)?;
-    } else if request.contains("GetAudioSourceConfigurations") {
-        println!("Handling supported endpoint: GetAudioSourceConfigurations");
-        dump_headers(&request, size, "GetAudioSourceConfigurations", config.debug);
-        send_audio_source_configurations_response(&mut stream)?;
-    } else if request.contains("GetAudioEncoderConfigurations") {
-        println!("Handling supported endpoint: GetAudioEncoderConfigurations");
-        dump_headers(
-            &request,
-            size,
-            "GetAudioEncoderConfigurations",
-            config.debug,
-        );
-        send_audio_encoder_configurations_response(&mut stream)?;
-    } else if request.contains("GetServiceCapabilities") {
-        println!("Handling supported endpoint: GetServiceCapabilities");
-        dump_headers(&request, size, "GetServiceCapabilities", config.debug);
-        send_service_capabilities_response(&mut stream)?;
-    } else if request.contains("GET /snapshot.jpg") {
-        println!("Handling snapshot request: GET /snapshot.jpg");
-        dump_headers(&request, size, "snapshot.jpg", config.debug);
-        send_snapshot_image_response(&mut stream, &config.rtsp_stream_url)?;
-    } else {
-        // Detect and log unsupported ONVIF endpoints
-        let unsupported_endpoint = detect_unsupported_onvif_endpoint(&request);
-        if let Some(endpoint) = unsupported_endpoint {
-            eprintln!("UNSUPPORTED ONVIF ENDPOINT: {endpoint}");
-            dump_headers(
-                &request,
-                size,
-                &format!("UNSUPPORTED_{endpoint}"),
-                config.debug,
-            );
-            send_unsupported_endpoint_response(&mut stream, &endpoint)?;
-        } else {
-            println!("Unknown request type: {first_line}");
-            dump_headers(&request, size, "UNKNOWN", config.debug);
-            send_default_response(&mut stream)?;
+impl OnvifResponse {
+    fn soap(status: u16, body: String) -> Self {
+        Self {
+            status,
+            content_type: SOAP_CONTENT_TYPE.to_string(),
+            headers: Vec::new(),
+            body: body.into_bytes(),
         }
     }
 
-    Ok(())
-}
-
-/// Debug function to dump request headers and content for troubleshooting
-fn dump_headers(request: &str, size: usize, endpoint_name: &str, debug_enabled: bool) {
-    if !debug_enabled {
-        return;
-    }
-
-    println!(
-        "=== DEBUG REQUEST DUMP FOR {} ===",
-        endpoint_name.to_uppercase()
-    );
-    println!("Request size: {size} bytes");
-    println!("Raw request:");
-    println!("{}", "=".repeat(50));
-    println!("{request}");
-    println!("{}", "=".repeat(50));
-
-    // Parse and display headers separately for easier reading
-    println!("Parsed headers:");
-    for (i, line) in request.lines().enumerate() {
-        if line.is_empty() {
-            println!("  [{}]: <EMPTY LINE - Headers end here>", i + 1);
-            break;
-        }
-        println!("  [{}]: {}", i + 1, line);
-    }
-    println!(
-        "=== END DEBUG REQUEST DUMP FOR {} ===",
-        endpoint_name.to_uppercase()
-    );
-}
-
-fn send_http_response(
-    stream: &mut TcpStream,
-    status: &str,
-    content_type: &str,
-    body: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let response = format!(
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
-        status,
-        content_type,
-        body.len(),
-        body
-    );
-    stream
-        .write_all(response.as_bytes())
-        .map_err(|e| format!("Failed to send HTTP response: {e}").into())
-}
-
-fn send_soap_response(
-    stream: &mut TcpStream,
-    body: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    send_http_response(stream, "200 OK", "application/soap+xml", body)
-}
-
-fn is_authenticated(request: &str, username: &str, password: &str) -> bool {
-    println!("  Starting authentication validation...");
-
-    // Check for Basic Auth first (simpler)
-    if let Some(auth_header) = extract_authorization_header(request) {
-        if auth_header.starts_with("Basic ") {
-            println!("  Attempting Basic Auth validation...");
-            return validate_basic_auth(&auth_header, username, password);
-        } else if auth_header.starts_with("Digest ") {
-            println!("  Attempting Digest Auth validation...");
-            return validate_digest_auth(&auth_header, request, username, password);
+    fn text(status: u16, body: &str) -> Self {
+        Self {
+            status,
+            content_type: TEXT_CONTENT_TYPE.to_string(),
+            headers: Vec::new(),
+            body: body.as_bytes().to_vec(),
         }
     }
 
-    // Check for WS-Security Username Token (Digest)
-    if request.contains("<UsernameToken>") && request.contains("<Username>") {
-        println!("  Found WS-Security UsernameToken, attempting validation...");
-        return validate_ws_security_auth(request, username, password);
+    fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers;
+        self
     }
 
-    println!("  No valid authentication method found");
-    false
+    /// Body as UTF-8 text, for logging and tests.
+    pub fn body_str(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.body)
+    }
 }
 
-fn is_public_endpoint(request: &str) -> bool {
-    // Allow certain endpoints without authentication for ONVIF discovery
-    let public_endpoints = [
-        "GetCapabilities",
-        "GetDeviceInformation",
-        "GetServices",
-        "GetSystemDateAndTime",
-        "GetServiceCapabilities",
-        "snapshot.jpg",
-    ];
+/// The ONVIF device and media service.
+pub struct OnvifService {
+    config: Config,
+    auth: Authenticator,
+}
 
-    for endpoint in &public_endpoints {
-        // Check various patterns where the endpoint might appear
-        if request.contains(endpoint)
-            || request.contains(&format!("<{endpoint}>"))
-            || request.contains(&format!("<{endpoint}/>"))
-            || request.contains(&format!(":{endpoint}"))
-            || request.contains(&format!("<{endpoint} "))
-            || request.contains(&format!("tds:{endpoint}"))
-            || request.contains(&format!("trt:{endpoint}"))
-            || request.contains(&format!("soap:{endpoint}"))
-        {
-            println!("  Detected public endpoint: {endpoint}");
-            return true;
-        }
+impl OnvifService {
+    pub fn new(config: Config) -> Self {
+        let auth = Authenticator::new(&config.onvif_username, &config.onvif_password);
+        Self { config, auth }
     }
 
-    println!("  Request does not match any public endpoint patterns");
-    false
-}
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
 
-fn extract_authorization_header(request: &str) -> Option<String> {
-    for line in request.lines() {
-        if line.to_lowercase().starts_with("authorization:") {
-            if let Some(auth_value) = line.split(':').nth(1) {
-                return Some(auth_value.trim().to_string());
+    /// Handles one HTTP request and produces a response. Pure with respect
+    /// to the network so it can be tested without sockets.
+    pub fn handle(
+        &self,
+        method: &str,
+        path: &str,
+        authorization: Option<&str>,
+        body: &[u8],
+    ) -> OnvifResponse {
+        let path = path.split('?').next().unwrap_or(path);
+        match method {
+            "GET" | "HEAD" if path == "/snapshot.jpg" => {
+                self.handle_snapshot(method, path, authorization)
             }
+            "GET" | "HEAD" => OnvifResponse::text(200, "ONVIF Media Transcoder\n"),
+            "POST" => self.handle_soap(method, path, authorization, body),
+            _ => OnvifResponse::text(405, "Method Not Allowed\n"),
         }
     }
-    None
-}
 
-fn validate_basic_auth(auth_header: &str, username: &str, password: &str) -> bool {
-    if let Some(encoded) = auth_header.strip_prefix("Basic ") {
-        if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded.trim()) {
-            if let Ok(decoded) = String::from_utf8(decoded_bytes) {
-                let expected = format!("{username}:{password}");
-                return decoded == expected;
+    fn unauthorized(&self, result: AuthResult) -> OnvifResponse {
+        let headers = self
+            .auth
+            .challenge_headers(result == AuthResult::Stale)
+            .into_iter()
+            .map(|v| ("WWW-Authenticate".to_string(), v))
+            .collect();
+        OnvifResponse::soap(
+            401,
+            soap_fault(
+                FaultCode::Sender,
+                "NotAuthorized",
+                "The action requested requires authorization and the sender is not authorized",
+            ),
+        )
+        .with_headers(headers)
+    }
+
+    /// Malformed or empty POST bodies. Digest clients (curl, many NVRs) probe
+    /// with an empty body first and expect a 401 challenge, so unauthenticated
+    /// callers get the challenge and authenticated ones get a 400 fault.
+    fn malformed(
+        &self,
+        method: &str,
+        path: &str,
+        authorization: Option<&str>,
+        reason: &str,
+    ) -> OnvifResponse {
+        let result = self.auth.authenticate(method, path, authorization, None);
+        if result != AuthResult::Authenticated {
+            return self.unauthorized(result);
+        }
+        OnvifResponse::soap(400, soap_fault(FaultCode::Sender, "WellFormed", reason))
+    }
+
+    fn handle_snapshot(
+        &self,
+        method: &str,
+        path: &str,
+        authorization: Option<&str>,
+    ) -> OnvifResponse {
+        let result = self.auth.authenticate(method, path, authorization, None);
+        if result != AuthResult::Authenticated {
+            debug!(?result, "snapshot request rejected");
+            return self.unauthorized(result);
+        }
+
+        match snapshot::capture_jpeg(&self.config.rtsp_stream_url) {
+            Ok(image) => OnvifResponse {
+                status: 200,
+                content_type: "image/jpeg".to_string(),
+                headers: vec![("Cache-Control".to_string(), "no-store".to_string())],
+                body: if method == "HEAD" { Vec::new() } else { image },
+            },
+            Err(snapshot::SnapshotError::Unavailable(e)) => {
+                warn!(error = %e, "snapshot unavailable");
+                OnvifResponse::text(503, "Snapshot generation unavailable\n")
             }
-        }
-    }
-    false
-}
-
-fn validate_digest_auth(auth_header: &str, request: &str, username: &str, password: &str) -> bool {
-    // Parse Digest authentication header
-    // Format: Digest username="user", realm="realm", nonce="nonce", uri="/path", response="hash"
-    let mut auth_params = std::collections::HashMap::new();
-
-    // Remove "Digest " prefix and split by comma
-    if let Some(digest_part) = auth_header.strip_prefix("Digest ") {
-        for param in digest_part.split(',') {
-            let param = param.trim();
-            if let Some(eq_pos) = param.find('=') {
-                let key = param[..eq_pos].trim();
-                let value = param[eq_pos + 1..].trim().trim_matches('"');
-                auth_params.insert(key, value);
+            Err(e) => {
+                warn!(error = %e, "snapshot failed");
+                OnvifResponse::text(502, "Failed to generate snapshot\n")
             }
         }
     }
 
-    // Extract required parameters
-    let auth_username = auth_params.get("username").unwrap_or(&"");
-    let realm = auth_params.get("realm").unwrap_or(&"");
-    let nonce = auth_params.get("nonce").unwrap_or(&"");
-    let uri = auth_params.get("uri").unwrap_or(&"");
-    let response = auth_params.get("response").unwrap_or(&"");
+    fn handle_soap(
+        &self,
+        method: &str,
+        path: &str,
+        authorization: Option<&str>,
+        body: &[u8],
+    ) -> OnvifResponse {
+        let text = String::from_utf8_lossy(body);
+        let request = match SoapRequest::parse(&text) {
+            Ok(request) => request,
+            Err(e) => {
+                debug!(error = %e, "rejecting malformed SOAP request");
+                return self.malformed(method, path, authorization, "Malformed SOAP request");
+            }
+        };
+        let Some(action) = request.action().map(str::to_string) else {
+            return self.malformed(method, path, authorization, "SOAP Body has no operation");
+        };
+        let action = action.as_str();
 
-    let method = request
-        .lines()
-        .next()
-        .unwrap_or("")
-        .split_whitespace()
-        .next()
-        .unwrap_or("GET");
-
-    println!("Digest Auth validation:");
-    println!("  Username: {auth_username}");
-    println!("  Realm: {realm}");
-    println!("  Method: {method}");
-    println!("  URI: {uri}");
-
-    // Check username
-    if auth_username != &username {
-        println!("Digest Auth: Username mismatch");
-        return false;
-    }
-
-    // Calculate expected response: MD5(HA1:nonce:HA2)
-    // where HA1 = MD5(username:realm:password)
-    // and HA2 = MD5(method:uri)
-
-    let ha1 = format!("{username}:{realm}:{password}");
-    let ha1_hash = format!("{:x}", md5::compute(ha1.as_bytes()));
-
-    let ha2 = format!("{method}:{uri}");
-    let ha2_hash = format!("{:x}", md5::compute(ha2.as_bytes()));
-
-    let expected_response_str = format!("{ha1_hash}:{nonce}:{ha2_hash}");
-    let expected_response = format!("{:x}", md5::compute(expected_response_str.as_bytes()));
-
-    println!("  Expected response: {expected_response}");
-    println!("  Provided response: {response}");
-
-    if response == &expected_response {
-        println!("Digest Auth: Authentication successful");
-        true
-    } else {
-        println!("Digest Auth: Authentication failed");
-        false
-    }
-}
-
-fn validate_ws_security_auth(request: &str, username: &str, password: &str) -> bool {
-    println!("  WS-Security validation starting...");
-
-    // Parse WS-Security UsernameToken
-    if let (Some(user_start), Some(user_end)) =
-        (request.find("<Username>"), request.find("</Username>"))
-    {
-        let provided_username = &request[user_start + 10..user_end];
-        if provided_username != username {
-            println!(
-                "  WS-Security: Username mismatch. Expected: {username}, Got: {provided_username}"
-            );
-            return false;
+        if !PUBLIC_OPERATIONS.contains(&action) {
+            let token = request.username_token();
+            let result = self
+                .auth
+                .authenticate(method, path, authorization, token.as_ref());
+            if result != AuthResult::Authenticated {
+                debug!(action, ?result, "authentication failed");
+                return self.unauthorized(result);
+            }
         }
-    } else {
-        println!("  WS-Security: No username found in request");
-        return false;
+
+        let ip = &self.config.container_ip;
+        let port = &self.config.onvif_port;
+        let body = match action {
+            "GetCapabilities" => responses::get_capabilities_response(ip, port),
+            "GetServices" => responses::get_services_response(ip, port),
+            "GetServiceCapabilities" => responses::get_service_capabilities_response(),
+            "GetSystemDateAndTime" => responses::get_system_date_time_response(),
+            "GetDeviceInformation" => responses::get_device_info_response(&self.config.device_name),
+            "GetProfiles" => responses::get_profiles_response(),
+            "GetStreamUri" => responses::get_stream_uri_response(&self.config.rtsp_stream_url),
+            "GetSnapshotUri" => responses::get_snapshot_uri_response(ip, port),
+            "GetVideoSources" => responses::get_video_sources_response(),
+            "GetVideoSourceConfigurations" => responses::get_video_source_configurations_response(),
+            "GetVideoEncoderConfigurations" => {
+                responses::get_video_encoder_configurations_response()
+            }
+            "GetAudioSourceConfigurations" => responses::get_audio_source_configurations_response(),
+            "GetAudioEncoderConfigurations" => {
+                responses::get_audio_encoder_configurations_response()
+            }
+            other => {
+                info!(action = other, "unsupported ONVIF operation");
+                return OnvifResponse::soap(
+                    400,
+                    soap_fault(
+                        FaultCode::Sender,
+                        "ActionNotSupported",
+                        &format!("The operation '{other}' is not supported by this device"),
+                    ),
+                );
+            }
+        };
+
+        debug!(action, "handled operation");
+        OnvifResponse::soap(200, body)
     }
 
-    // Look for different password element patterns
-    if let Some(password_start) = request.find("<Password") {
-        // Find the end of the opening tag
-        if let Some(tag_end) = request[password_start..].find('>') {
-            let tag_content = &request[password_start..password_start + tag_end + 1];
-
-            // Find the password value
-            if let Some(pwd_end) = request[password_start + tag_end + 1..].find("</Password>") {
-                let password_value =
-                    &request[password_start + tag_end + 1..password_start + tag_end + 1 + pwd_end];
-
-                // Check what type of password authentication is being used
-                if tag_content.contains("PasswordDigest") {
-                    println!("  WS-Security: Found PasswordDigest type");
-
-                    // Extract nonce - look for various nonce patterns
-                    let nonce = extract_ws_security_element(request, "Nonce");
-
-                    // Extract created timestamp - look for various created patterns
-                    let created = extract_ws_security_element(request, "Created");
-
-                    // If either is None, we can't validate
-                    if nonce.is_none() || created.is_none() {
-                        println!("  WS-Security: Missing nonce or created timestamp");
-                        return false;
-                    }
-
-                    let nonce = nonce.unwrap();
-                    let created = created.unwrap();
-
-                    // Decode the nonce from base64
-                    let nonce_bytes = match general_purpose::STANDARD.decode(nonce) {
-                        Ok(bytes) => bytes,
-                        Err(_) => {
-                            println!("  WS-Security: Failed to decode nonce");
-                            return false;
+    /// Binds `addr` and serves requests on `workers` threads until the
+    /// returned handle is shut down.
+    pub fn serve(
+        self: Arc<Self>,
+        addr: &str,
+        workers: usize,
+    ) -> Result<ServerHandle, Box<dyn std::error::Error + Send + Sync>> {
+        let server = Arc::new(tiny_http::Server::http(addr)?);
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut threads = Vec::with_capacity(workers);
+        for i in 0..workers.max(1) {
+            let server = Arc::clone(&server);
+            let service = Arc::clone(&self);
+            let stop = Arc::clone(&stop);
+            let thread = std::thread::Builder::new()
+                .name(format!("onvif-http-{i}"))
+                .spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        match server.recv_timeout(Duration::from_millis(250)) {
+                            Ok(Some(request)) => service.respond(request),
+                            Ok(None) => continue,
+                            Err(e) => {
+                                debug!(error = %e, "http worker stopping");
+                                break;
+                            }
                         }
-                    };
-
-                    // Calculate expected password digest
-                    // PasswordDigest = Base64(SHA1(Nonce + Created + Password))
-                    let mut hasher = sha1::Sha1::new();
-                    hasher.update(&nonce_bytes);
-                    hasher.update(created.as_bytes());
-                    hasher.update(password.as_bytes());
-                    let digest = hasher.finalize();
-                    let expected_digest = general_purpose::STANDARD.encode(digest);
-
-                    println!("  Expected digest: {expected_digest}");
-                    println!("  Provided digest: {password_value}");
-
-                    if password_value == expected_digest {
-                        println!("  WS-Security: Authentication successful");
-                        true
-                    } else {
-                        println!("  WS-Security: Authentication failed - digest mismatch");
-                        false
                     }
-                } else {
-                    println!("  WS-Security: Using plain text password");
-                    if password_value == password {
-                        println!("  WS-Security: Authentication successful");
-                        true
-                    } else {
-                        println!("  WS-Security: Authentication failed - password mismatch");
-                        false
-                    }
-                }
-            } else {
-                println!("  WS-Security: Malformed Password element - no closing tag");
-                false
-            }
-        } else {
-            println!("  WS-Security: Malformed Password element - no closing >");
-            false
+                })?;
+            threads.push(thread);
         }
-    } else {
-        println!("  WS-Security: No Password element found");
-        false
+        Ok(ServerHandle {
+            server,
+            stop,
+            threads,
+        })
+    }
+
+    fn respond(&self, mut request: tiny_http::Request) {
+        let method = request.method().as_str().to_string();
+        let url = request.url().to_string();
+        let remote = request
+            .remote_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
+        let authorization = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("Authorization"))
+            .map(|h| h.value.as_str().to_string());
+
+        if request.body_length().unwrap_or(0) > MAX_BODY_BYTES {
+            let _ = request.respond(
+                tiny_http::Response::from_string("Payload Too Large\n").with_status_code(413),
+            );
+            return;
+        }
+
+        let mut body = Vec::new();
+        if let Err(e) = request
+            .as_reader()
+            .take(MAX_BODY_BYTES as u64 + 1)
+            .read_to_end(&mut body)
+        {
+            debug!(error = %e, remote, "failed to read request body");
+            return;
+        }
+        if body.len() > MAX_BODY_BYTES {
+            let _ = request.respond(
+                tiny_http::Response::from_string("Payload Too Large\n").with_status_code(413),
+            );
+            return;
+        }
+
+        let response = self.handle(&method, &url, authorization.as_deref(), &body);
+        info!(remote, method, url, status = response.status, "request");
+
+        let mut http = tiny_http::Response::from_data(response.body)
+            .with_status_code(response.status)
+            .with_header(header("Content-Type", &response.content_type));
+        for (name, value) in &response.headers {
+            http.add_header(header(name, value));
+        }
+        if let Err(e) = request.respond(http) {
+            debug!(error = %e, remote, "failed to send response");
+        }
     }
 }
 
-fn extract_ws_security_element(request: &str, element_name: &str) -> Option<String> {
-    // Look for opening tag with various prefixes and potential attributes
-    for prefix in ["", "wsu:", "wsse:", "s:", "soap:"] {
-        let tag_start = format!("<{prefix}{element_name}");
-        let mut search_start = 0;
+fn header(name: &str, value: &str) -> tiny_http::Header {
+    tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes())
+        .expect("header name and value are ASCII")
+}
 
-        while let Some(open_pos) = request[search_start..].find(&tag_start) {
-            let absolute_open_pos = search_start + open_pos;
+/// A running HTTP server.
+pub struct ServerHandle {
+    server: Arc<tiny_http::Server>,
+    stop: Arc<AtomicBool>,
+    threads: Vec<JoinHandle<()>>,
+}
 
-            // Check if it's a complete tag match (followed by > or space)
-            let next_char_idx = absolute_open_pos + tag_start.len();
-            if next_char_idx < request.len() {
-                let next_char = request.as_bytes()[next_char_idx] as char;
-                if next_char != '>' && !next_char.is_whitespace() {
-                    // Not a match (e.g. UsernameToken matched Username), continue searching
-                    search_start = absolute_open_pos + 1;
-                    continue;
-                }
-            }
+impl ServerHandle {
+    /// The address the server is listening on.
+    pub fn local_addr(&self) -> Option<std::net::SocketAddr> {
+        self.server.server_addr().to_ip()
+    }
 
-            // Find the end of the opening tag (either > or space)
-            let content_start = if let Some(gt_pos) = request[absolute_open_pos..].find('>') {
-                absolute_open_pos + gt_pos + 1
-            } else {
-                search_start = absolute_open_pos + 1;
-                continue;
-            };
-
-            // Look for the closing tag
-            let close_tag = format!("</{prefix}{element_name}>");
-            if let Some(close_pos) = request[content_start..].find(&close_tag) {
-                let content_end = content_start + close_pos;
-                let content = request[content_start..content_end].trim();
-
-                println!("  Found {element_name}: '{content}'");
-                return Some(content.to_string());
-            } else {
-                // Found start tag but no closing tag
-                break;
-            }
+    /// Stops accepting requests and waits for worker threads to exit.
+    pub fn shutdown(self) {
+        self.stop.store(true, Ordering::Relaxed);
+        self.server.unblock();
+        for thread in self.threads {
+            let _ = thread.join();
         }
     }
 
-    println!("  Could not find element: {element_name}");
-    None
-}
-
-fn send_auth_required_response(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
-    let auth_response = get_auth_required_response();
-    stream
-        .write_all(auth_response.as_bytes())
-        .map_err(|e| format!("Failed to send auth required response: {e}").into())
-}
-
-fn send_capabilities_response(
-    stream: &mut TcpStream,
-    container_ip: &str,
-    onvif_port: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_capabilities_response(container_ip, onvif_port);
-    send_soap_response(stream, &body)
-}
-
-fn send_services_response(
-    stream: &mut TcpStream,
-    container_ip: &str,
-    onvif_port: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_services_response(container_ip, onvif_port);
-    send_soap_response(stream, &body)
-}
-
-fn send_system_date_time_response(
-    stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_system_date_time_response();
-    send_soap_response(stream, &body)
-}
-
-fn send_profiles_response(
-    stream: &mut TcpStream,
-    _rtsp_stream_url: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_profiles_response();
-    // Inject the correct RTSP URL into the profiles response if needed,
-    // but the current template uses hardcoded profiles.
-    // The original code didn't seem to inject the URL into profiles,
-    // but it did for GetStreamUri.
-    // Wait, the original code passed rtsp_stream_url to send_profiles_response but didn't use it in get_profiles_response.
-    // I'll keep it consistent with the original code for now.
-    send_soap_response(stream, &body)
-}
-
-fn send_stream_uri_response(
-    stream: &mut TcpStream,
-    rtsp_stream_url: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_stream_uri_response(rtsp_stream_url);
-    send_soap_response(stream, &body)
-}
-
-fn send_snapshot_uri_response(
-    stream: &mut TcpStream,
-    container_ip: &str,
-    onvif_port: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_snapshot_uri_response(container_ip, onvif_port);
-    send_soap_response(stream, &body)
-}
-
-fn send_device_info_response(
-    stream: &mut TcpStream,
-    device_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_device_info_response(device_name);
-    send_soap_response(stream, &body)
-}
-
-fn send_video_sources_response(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_video_sources_response();
-    send_soap_response(stream, &body)
-}
-
-fn send_video_source_configurations_response(
-    stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_video_source_configurations_response();
-    send_soap_response(stream, &body)
-}
-
-fn send_video_encoder_configurations_response(
-    stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_video_encoder_configurations_response();
-    send_soap_response(stream, &body)
-}
-
-fn send_audio_source_configurations_response(
-    stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_audio_source_configurations_response();
-    send_soap_response(stream, &body)
-}
-
-fn send_audio_encoder_configurations_response(
-    stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_audio_encoder_configurations_response();
-    send_soap_response(stream, &body)
-}
-
-fn send_service_capabilities_response(
-    stream: &mut TcpStream,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_service_capabilities_response();
-    send_soap_response(stream, &body)
-}
-
-fn send_snapshot_image_response(
-    stream: &mut TcpStream,
-    rtsp_stream_url: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Generating snapshot from RTSP stream: {}", rtsp_stream_url);
-
-    // Use ffmpeg to capture a single frame
-    // This requires ffmpeg to be installed in the container
-    let output = std::process::Command::new("ffmpeg")
-        .args(&[
-            "-y",
-            "-i",
-            rtsp_stream_url,
-            "-vframes",
-            "1",
-            "-f",
-            "image2",
-            "-update",
-            "1",
-            "-", // Output to stdout
-        ])
-        .output();
-
-    match output {
-        Ok(output) => {
-            if output.status.success() {
-                println!(
-                    "Snapshot generated successfully ({} bytes)",
-                    output.stdout.len()
-                );
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
-                    output.stdout.len()
-                );
-                stream.write_all(response.as_bytes())?;
-                stream.write_all(&output.stdout)?;
-            } else {
-                let error_msg = String::from_utf8_lossy(&output.stderr);
-                eprintln!("FFmpeg failed to generate snapshot: {}", error_msg);
-                send_http_response(
-                    stream,
-                    "500 Internal Server Error",
-                    "text/plain",
-                    "Failed to generate snapshot",
-                )?;
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to execute ffmpeg: {}", e);
-            send_http_response(
-                stream,
-                "500 Internal Server Error",
-                "text/plain",
-                "Snapshot generation unavailable",
-            )?;
+    /// Blocks until all worker threads exit.
+    pub fn join(self) {
+        for thread in self.threads {
+            let _ = thread.join();
         }
     }
-
-    Ok(())
-}
-
-fn send_unsupported_endpoint_response(
-    stream: &mut TcpStream,
-    endpoint: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_unsupported_endpoint_response(endpoint);
-    send_soap_response(stream, &body)
-}
-
-fn send_default_response(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
-    let body = get_default_response();
-    send_http_response(stream, "200 OK", "text/plain", &body)
-}
-
-fn detect_unsupported_onvif_endpoint(request: &str) -> Option<String> {
-    for endpoint in UNSUPPORTED_ENDPOINTS {
-        if request.contains(endpoint) {
-            return Some(endpoint.to_string());
-        }
-    }
-    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use clap::Parser;
 
-    #[test]
-    fn test_is_public_endpoint() {
-        assert!(is_public_endpoint(
-            "POST /onvif/device_service HTTP/1.1\r\n<s:Body><tds:GetCapabilities/></s:Body>"
-        ));
-        assert!(is_public_endpoint(
-            "POST /onvif/device_service HTTP/1.1\r\n<s:Body><tds:GetDeviceInformation/></s:Body>"
-        ));
-        assert!(is_public_endpoint(
-            "POST /onvif/device_service HTTP/1.1\r\n<s:Body><tds:GetServices/></s:Body>"
-        ));
-        assert!(is_public_endpoint(
-            "POST /onvif/device_service HTTP/1.1\r\n<s:Body><tds:GetSystemDateAndTime/></s:Body>"
-        ));
-        assert!(is_public_endpoint("GET /snapshot.jpg HTTP/1.1"));
+    fn service() -> OnvifService {
+        let config =
+            Config::try_parse_from(["test", "-r", "rtsp://127.0.0.1:8554/stream"]).expect("config");
+        OnvifService::new(config)
+    }
 
-        // Private endpoints
-        assert!(!is_public_endpoint(
-            "POST /onvif/media_service HTTP/1.1\r\n<s:Body><trt:GetProfiles/></s:Body>"
-        ));
-        assert!(!is_public_endpoint(
-            "POST /onvif/media_service HTTP/1.1\r\n<s:Body><trt:GetStreamUri/></s:Body>"
-        ));
+    fn envelope(body: &str) -> Vec<u8> {
+        format!(
+            r#"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>{body}</s:Body></s:Envelope>"#
+        )
+        .into_bytes()
+    }
+
+    fn basic() -> String {
+        format!("Basic {}", BASE64.encode("admin:onvif-rust"))
     }
 
     #[test]
-    fn test_extract_authorization_header() {
-        let req = "POST / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Basic YWRtaW46cGFzc3dvcmQ=\r\n\r\n";
-        assert_eq!(
-            extract_authorization_header(req),
-            Some("Basic YWRtaW46cGFzc3dvcmQ=".to_string())
+    fn public_operation_without_credentials() {
+        let svc = service();
+        let r = svc.handle(
+            "POST",
+            "/onvif/device_service",
+            None,
+            &envelope(
+                "<tds:GetCapabilities xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\"/>",
+            ),
         );
-
-        let req_no_auth = "POST / HTTP/1.1\r\nHost: localhost\r\n\r\n";
-        assert_eq!(extract_authorization_header(req_no_auth), None);
+        assert_eq!(r.status, 200);
+        assert!(r.body_str().contains("GetCapabilitiesResponse"));
+        assert!(roxmltree::Document::parse(&r.body_str()).is_ok());
     }
 
     #[test]
-    fn test_validate_basic_auth() {
-        // "admin:password" base64 encoded is "YWRtaW46cGFzc3dvcmQ="
-        let header = "Basic YWRtaW46cGFzc3dvcmQ=";
-        assert!(validate_basic_auth(header, "admin", "password"));
-        assert!(!validate_basic_auth(header, "admin", "wrong"));
-        assert!(!validate_basic_auth(header, "wrong", "password"));
+    fn protected_operation_requires_credentials() {
+        let svc = service();
+        let body =
+            envelope("<trt:GetStreamUri xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\"/>");
+        let r = svc.handle("POST", "/onvif/media_service", None, &body);
+        assert_eq!(r.status, 401);
+        assert!(r.body_str().contains("ter:NotAuthorized"));
+        let challenges: Vec<_> = r
+            .headers
+            .iter()
+            .filter(|(k, _)| k == "WWW-Authenticate")
+            .collect();
+        assert_eq!(challenges.len(), 2);
+        assert!(challenges[0].1.starts_with("Digest "));
+        assert!(challenges[0].1.contains("qop=\"auth\""));
+
+        let r = svc.handle("POST", "/onvif/media_service", Some(&basic()), &body);
+        assert_eq!(r.status, 200);
+        assert!(r.body_str().contains("rtsp://127.0.0.1:8554/stream"));
     }
 
     #[test]
-    fn test_detect_unsupported_onvif_endpoint() {
-        let req = "<s:Body><tds:SetSystemDateAndTime/></s:Body>";
-        // Assuming SetSystemDateAndTime is in UNSUPPORTED_ENDPOINTS
-        // We need to check the actual list in endpoints.rs, but for now let's check a known one if possible
-        // or just check that it returns something for a known unsupported one.
-        // Let's check a generic one that is likely unsupported.
-        // If UNSUPPORTED_ENDPOINTS contains "SetSystemDateAndTime"
-        if UNSUPPORTED_ENDPOINTS.contains(&"SetSystemDateAndTime") {
-            assert_eq!(
-                detect_unsupported_onvif_endpoint(req),
-                Some("SetSystemDateAndTime".to_string())
+    fn public_operation_names_elsewhere_do_not_bypass_auth() {
+        let svc = service();
+        let body = r#"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><X>GetDeviceInformation GetCapabilities</X></s:Header><s:Body><!-- GetServices --><trt:GetStreamUri xmlns:trt="http://www.onvif.org/ver10/media/wsdl"/></s:Body></s:Envelope>"#;
+        let r = svc.handle("POST", "/onvif/media_service", None, body.as_bytes());
+        assert_eq!(r.status, 401);
+    }
+
+    #[test]
+    fn device_information_now_requires_auth() {
+        let svc = service();
+        let body = envelope(
+            "<tds:GetDeviceInformation xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\"/>",
+        );
+        assert_eq!(
+            svc.handle("POST", "/onvif/device_service", None, &body)
+                .status,
+            401
+        );
+        assert_eq!(
+            svc.handle("POST", "/onvif/device_service", Some(&basic()), &body)
+                .status,
+            200
+        );
+    }
+
+    #[test]
+    fn ws_security_prefixed_text_password_is_accepted() {
+        let svc = service();
+        let body = r#"<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><soap:Header><wsse:Security><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">onvif-rust</wsse:Password></wsse:UsernameToken></wsse:Security></soap:Header><soap:Body><GetProfiles/></soap:Body></soap:Envelope>"#;
+        let r = svc.handle("POST", "/onvif/media_service", None, body.as_bytes());
+        assert_eq!(r.status, 200, "{}", r.body_str());
+        assert!(r.body_str().contains("GetProfilesResponse"));
+    }
+
+    #[test]
+    fn unsupported_operation_returns_action_not_supported() {
+        let svc = service();
+        let r = svc.handle(
+            "POST",
+            "/onvif/device_service",
+            Some(&basic()),
+            &envelope(
+                "<tds:SetSystemDateAndTime xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\"/>",
+            ),
+        );
+        assert_eq!(r.status, 400);
+        assert!(r.body_str().contains("ter:ActionNotSupported"));
+    }
+
+    #[test]
+    fn malformed_requests_are_rejected() {
+        let svc = service();
+        // Unauthenticated malformed/empty bodies receive a Digest challenge so
+        // that clients probing for the auth scheme (curl --digest) can proceed.
+        let r = svc.handle("POST", "/onvif/device_service", None, b"");
+        assert_eq!(r.status, 401);
+        assert!(r
+            .headers
+            .iter()
+            .any(|(k, v)| k == "WWW-Authenticate" && v.starts_with("Digest")));
+        let r = svc.handle("POST", "/onvif/device_service", Some(&basic()), b"<not xml");
+        assert_eq!(r.status, 400);
+        assert!(r.body_str().contains("ter:WellFormed"));
+        let r = svc.handle("DELETE", "/", None, b"");
+        assert_eq!(r.status, 405);
+    }
+
+    #[test]
+    fn health_and_snapshot_paths() {
+        let svc = service();
+        assert_eq!(svc.handle("GET", "/", None, b"").status, 200);
+        assert_eq!(
+            svc.handle("GET", "/onvif/device_service", None, b"").status,
+            200
+        );
+        // Snapshot needs credentials now.
+        assert_eq!(svc.handle("GET", "/snapshot.jpg", None, b"").status, 401);
+        assert_eq!(
+            svc.handle("GET", "/snapshot.jpg?x=1", None, b"").status,
+            401
+        );
+    }
+
+    #[test]
+    fn all_supported_operations_return_well_formed_xml() {
+        let svc = service();
+        for op in [
+            "GetCapabilities",
+            "GetServices",
+            "GetServiceCapabilities",
+            "GetSystemDateAndTime",
+            "GetDeviceInformation",
+            "GetProfiles",
+            "GetStreamUri",
+            "GetSnapshotUri",
+            "GetVideoSources",
+            "GetVideoSourceConfigurations",
+            "GetVideoEncoderConfigurations",
+            "GetAudioSourceConfigurations",
+            "GetAudioEncoderConfigurations",
+        ] {
+            let r = svc.handle(
+                "POST",
+                "/onvif/device_service",
+                Some(&basic()),
+                &envelope(&format!("<{op}/>")),
             );
+            assert_eq!(r.status, 200, "{op}");
+            roxmltree::Document::parse(&r.body_str()).unwrap_or_else(|e| panic!("{op}: {e}"));
         }
-
-        let req_supported = "<s:Body><tds:GetCapabilities/></s:Body>";
-        assert_eq!(detect_unsupported_onvif_endpoint(req_supported), None);
-    }
-
-    #[test]
-    fn test_extract_ws_security_element() {
-        let req = r#"<wsse:Security><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password>pass</wsse:Password></wsse:UsernameToken></wsse:Security>"#;
-        assert_eq!(
-            extract_ws_security_element(req, "Username"),
-            Some("admin".to_string())
-        );
-        assert_eq!(
-            extract_ws_security_element(req, "Password"),
-            Some("pass".to_string())
-        );
-        assert_eq!(extract_ws_security_element(req, "Nonce"), None);
     }
 }

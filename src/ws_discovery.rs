@@ -143,7 +143,7 @@ impl WSDiscoveryServer {
                         }
 
                         // Periodic status update every ~10 seconds
-                        if message_count % 10 == 0 && message_count > 0 && self.debug {
+                        if message_count.is_multiple_of(10) && message_count > 0 && self.debug {
                             println!(
                                 "WS-Discovery: Processed {message_count} messages, still listening..."
                             );
@@ -324,8 +324,8 @@ fn extract_message_id(message: &str) -> String {
                 let message_id = message[id_start..id_end].trim();
 
                 // Clean up the message ID - remove urn:uuid: prefix if present
-                if message_id.starts_with("urn:uuid:") {
-                    return message_id[9..].to_string();
+                if let Some(stripped) = message_id.strip_prefix("urn:uuid:") {
+                    return stripped.to_string();
                 } else if !message_id.is_empty() {
                     return message_id.to_string();
                 }
@@ -449,10 +449,6 @@ mod tests {
 
     #[test]
     fn test_is_probe_request() {
-        let probe_msg = r#"<soap:Envelope><soap:Body><d:Probe><d:Types>tdn:NetworkVideoTransmitter</d:Types></d:Probe></soap:Body></soap:Envelope>"#;
-        // Note: The simple contains check might fail if namespaces aren't exactly as expected in the constant,
-        // but the function checks for "Probe" and "Types" so it should pass.
-        // Let's make a more realistic probe message that matches the logic
         let valid_probe = format!(
             r#"<soap:Envelope xmlns:d="{}"><soap:Body><d:Probe><d:Types>tdn:NetworkVideoTransmitter</d:Types></d:Probe></soap:Body></soap:Envelope>"#,
             WS_DISCOVERY_NAMESPACE

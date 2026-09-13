@@ -59,7 +59,10 @@ pub fn get_capabilities_response(container_ip: &str, onvif_port: &str) -> String
 </tds:GetCapabilitiesResponse>"#
     );
 
-    SoapResponseBuilder::new().set_body(&body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(&body_content)
+        .build()
 }
 
 pub fn get_services_response(container_ip: &str, onvif_port: &str) -> String {
@@ -210,7 +213,10 @@ pub fn get_profiles_response() -> String {
 </trt:Profiles>
 </trt:GetProfilesResponse>"#;
 
-    SoapResponseBuilder::new().set_body(body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(body_content)
+        .build()
 }
 
 pub fn get_stream_uri_response(rtsp_stream: &str) -> String {
@@ -222,7 +228,10 @@ pub fn get_stream_uri_response(rtsp_stream: &str) -> String {
 </trt:GetStreamUriResponse>"#
     );
 
-    SoapResponseBuilder::new().set_body(&body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(&body_content)
+        .build()
 }
 
 pub fn get_device_info_response(device_name: &str) -> String {
@@ -252,7 +261,10 @@ pub fn get_video_sources_response() -> String {
 </trt:VideoSources>
 </trt:GetVideoSourcesResponse>"#;
 
-    SoapResponseBuilder::new().set_body(body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(body_content)
+        .build()
 }
 
 pub fn get_service_capabilities_response() -> String {
@@ -269,7 +281,10 @@ pub fn get_service_capabilities_response() -> String {
 </trt:Capabilities>
 </trt:GetServiceCapabilitiesResponse>"#;
 
-    SoapResponseBuilder::new().set_body(body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(body_content)
+        .build()
 }
 
 pub fn get_video_source_configurations_response() -> String {
@@ -288,7 +303,10 @@ pub fn get_video_source_configurations_response() -> String {
 </trt:Configurations>
 </trt:GetVideoSourceConfigurationsResponse>"#;
 
-    SoapResponseBuilder::new().set_body(body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(body_content)
+        .build()
 }
 
 pub fn get_video_encoder_configurations_response() -> String {
@@ -355,7 +373,10 @@ pub fn get_video_encoder_configurations_response() -> String {
 </trt:Configurations>
 </trt:GetVideoEncoderConfigurationsResponse>"#;
 
-    SoapResponseBuilder::new().set_body(body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(body_content)
+        .build()
 }
 
 pub fn get_audio_source_configurations_response() -> String {
@@ -372,65 +393,6 @@ pub fn get_audio_encoder_configurations_response() -> String {
     SoapResponseBuilder::new().set_body(body_content).build()
 }
 
-pub fn get_auth_required_response() -> String {
-    // Generate a fresh nonce for each authentication challenge
-    let nonce = uuid::Uuid::new_v4().to_string().replace('-', "");
-
-    let soap_response = SoapResponseBuilder::new()
-        .set_body(
-            r#"<soap:Fault>
-<soap:Code>
-<soap:Value>soap:Sender</soap:Value>
-<soap:Subcode>
-<soap:Value>ter:NotAuthorized</soap:Value>
-</soap:Subcode>
-</soap:Code>
-<soap:Reason>
-<soap:Text xml:lang="en">Authentication required</soap:Text>
-</soap:Reason>
-</soap:Fault>"#,
-        )
-        .build();
-
-    format!(
-        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Digest realm=\"ONVIF Camera\", nonce=\"{nonce}\", qop=\"auth\", stale=false\r\nContent-Type: application/soap+xml; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
-        soap_response.len(),
-        soap_response
-    )
-}
-
-pub fn get_ws_security_auth_fault() -> String {
-    let soap_response = SoapResponseBuilder::new()
-        .add_namespace("ter", "http://www.onvif.org/ver10/error")
-        .set_body(
-            r#"<soap:Fault>
-<soap:Code>
-<soap:Value>soap:Sender</soap:Value>
-<soap:Subcode>
-<soap:Value>ter:NotAuthorized</soap:Value>
-</soap:Subcode>
-</soap:Code>
-<soap:Reason>
-<soap:Text xml:lang="en">Sender not Authorized</soap:Text>
-</soap:Reason>
-<soap:Detail>
-<soap:Text>WS-Security authentication required. Please provide UsernameToken with PasswordDigest or PasswordText.</soap:Text>
-</soap:Detail>
-</soap:Fault>"#,
-        )
-        .build();
-
-    format!(
-        "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/soap+xml; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
-        soap_response.len(),
-        soap_response
-    )
-}
-
-pub fn get_default_response() -> String {
-    "ONVIF Camera\n".to_string()
-}
-
 pub fn get_snapshot_uri_response(container_ip: &str, onvif_port: &str) -> String {
     let body_content = format!(
         r#"<trt:GetSnapshotUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
@@ -440,7 +402,10 @@ pub fn get_snapshot_uri_response(container_ip: &str, onvif_port: &str) -> String
 </trt:GetSnapshotUriResponse>"#
     );
 
-    SoapResponseBuilder::new().set_body(&body_content).build()
+    SoapResponseBuilder::new()
+        .add_namespace("tt", "http://www.onvif.org/ver10/schema")
+        .set_body(&body_content)
+        .build()
 }
 
 pub fn get_system_date_time_response() -> String {
@@ -482,27 +447,4 @@ pub fn get_system_date_time_response() -> String {
         .add_namespace("tt", "http://www.onvif.org/ver10/schema")
         .set_body(&body_content)
         .build()
-}
-
-pub fn get_unsupported_endpoint_response(endpoint: &str) -> String {
-    let body_content = format!(
-        r#"<soap:Fault>
-<soap:Code>
-<soap:Value>soap:Receiver</soap:Value>
-</soap:Code>
-<soap:Reason>
-<soap:Text xml:lang="en">The requested operation '{endpoint}' is not supported by this ONVIF Media Transcoder implementation.</soap:Text>
-</soap:Reason>
-<soap:Detail>
-<ter:Action xmlns:ter="http://www.onvif.org/ver10/error">
-<ter:Operation>{endpoint}</ter:Operation>
-<ter:Category>Receiver</ter:Category>
-<ter:Reason>OperationNotSupported</ter:Reason>
-<ter:Detail>This ONVIF Media Transcoder supports basic streaming functionality. The requested operation is not implemented.</ter:Detail>
-</ter:Action>
-</soap:Detail>
-</soap:Fault>"#
-    );
-
-    SoapResponseBuilder::new().set_body(&body_content).build()
 }
