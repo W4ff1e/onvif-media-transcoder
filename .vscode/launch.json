@@ -1,130 +1,47 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    // Requires the CodeLLDB extension (vadimcn.vscode-lldb).
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Docker: Build and Run (Test)",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "/bin/echo",
-            "args": [
-                "Docker task completed"
-            ],
-            "preLaunchTask": "Docker: Build and Run",
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "Docker: Build Only",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "/bin/echo",
-            "args": [
-                "Build completed"
-            ],
-            "preLaunchTask": "Docker: Build Image",
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "Docker: Run HLS Test",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "/bin/echo",
-            "args": [
-                "HLS test started"
-            ],
-            "preLaunchTask": "Docker: Run Container (HLS Test)",
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "Rust: Debug Local (Demo Stream)",
+            "name": "Debug ONVIF service",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/onvif-media-transcoder",
+            "cargo": {
+                "args": ["build", "--bin=onvif-media-transcoder"]
+            },
             "args": [
-                "--rtsp-stream-url",
-                "rtsp://127.0.0.1:8554/stream",
-                "--onvif-port",
-                "8080",
-                "--device-name",
-                "Local-ONVIF-Transcoder",
-                "--onvif-username",
-                "admin",
-                "--onvif-password",
-                "onvif-rust"
-            ],
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "Rust: Build",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Rust: Debug with WS-Discovery",
-            "type": "lldb",
-            "request": "launch",
-            "program": "${workspaceFolder}/target/debug/onvif-media-transcoder",
-            "args": [
-                "--rtsp-stream-url",
-                "rtsp://127.0.0.1:8554/stream",
-                "--onvif-port",
-                "8080",
-                "--device-name",
-                "WS-Discovery-Transcoder",
-                "--onvif-username",
-                "admin",
-                "--onvif-password",
-                "onvif-rust",
-                "--ws-discovery-enabled"
-            ],
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "Rust: Build",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Rust: Debug with Debug Mode",
-            "type": "lldb",
-            "request": "launch",
-            "program": "${workspaceFolder}/target/debug/onvif-media-transcoder",
-            "args": [
-                "--rtsp-stream-url",
-                "rtsp://127.0.0.1:8554/stream",
-                "--onvif-port",
-                "8080",
-                "--device-name",
-                "Debug-ONVIF-Transcoder",
-                "--onvif-username",
-                "admin",
-                "--onvif-password",
-                "onvif-rust",
+                "--rtsp-stream-url", "rtsp://127.0.0.1:8554/stream",
+                "--onvif-port", "8080",
+                "--device-name", "Dev Camera",
+                "--container-ip", "127.0.0.1",
                 "--debug"
             ],
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "Rust: Build",
-            "console": "integratedTerminal"
+            "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Rust: Run Tests",
+            "name": "Debug with WS-Discovery",
             "type": "lldb",
             "request": "launch",
-            "program": "/bin/echo",
+            "cargo": {
+                "args": ["build", "--bin=onvif-media-transcoder"]
+            },
             "args": [
-                "Tests completed"
+                "--rtsp-stream-url", "rtsp://127.0.0.1:8554/stream",
+                "--device-name", "Dev Camera",
+                "--ws-discovery-enabled",
+                "--debug"
             ],
-            "preLaunchTask": "Rust: Test",
-            "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal"
+            "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Rust: Check Code",
+            "name": "Debug unit tests",
             "type": "lldb",
             "request": "launch",
-            "program": "/bin/echo",
-            "args": [
-                "Code check completed"
-            ],
-            "preLaunchTask": "Rust: Check",
-            "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal"
+            "cargo": {
+                "args": ["test", "--no-run", "--lib"],
+                "filter": { "kind": "lib" }
+            },
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

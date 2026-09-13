@@ -1,107 +1,55 @@
 # Scripts
 
-This directory contains utility scripts for building, testing, and publishing the ONVIF Media Transcoder.
+Helper scripts for building, running, testing and publishing the container.
+All of them can be run from any directory; they operate on the repository root.
 
-## Available Scripts
+| Script | Purpose |
+| :--- | :--- |
+| `quick-start.sh` | Everyday commands: `setup`, `build`, `run`, `compose`, `stop`, `logs`, `test`, `clean` |
+| `build.sh` | Build the image, optionally multi-platform with `--platform` and `--push` |
+| `publish.sh` | Build and push tagged images to a registry |
+| `e2e-test.sh` | Hermetic end-to-end test of a built image (also used by CI) |
 
-- **`build.sh`** - Comprehensive Docker build script with multi-architecture support
-- **`publish.sh`** - Docker image publishing script for Docker Hub
-- **`quick-start.sh`** - Quick setup and testing script with multiple commands
-
-## Usage
-
-Make scripts executable before running:
-
-```bash
-chmod +x scripts/*.sh
-```
-
-### Build Script (`build.sh`)
-
-Builds Docker images with support for multiple architectures:
+## quick-start.sh
 
 ```bash
-./scripts/build.sh [options]
+scripts/quick-start.sh setup     # copy examples/.env.example to .env, then edit it
+scripts/quick-start.sh run       # build and run with host networking
+scripts/quick-start.sh compose   # start via examples/docker-compose.yml
+scripts/quick-start.sh test      # run the end-to-end test against the built image
 ```
 
-**Features:**
+`IMAGE`, `COMPOSE_FILE` and `ENV_FILE` environment variables override the
+defaults (`onvif-media-transcoder`, `examples/docker-compose.yml`, `.env`).
 
-- Multi-architecture support (amd64, arm64)
-- Caching optimization
-- Security scanning integration
-- Build argument customization
-
-### Publish Script (`publish.sh`)
-
-Publishes Docker images to Docker Hub:
+## build.sh
 
 ```bash
-./scripts/publish.sh [options]
+scripts/build.sh                                  # local image onvif-media-transcoder:latest
+scripts/build.sh -t v0.31.0 -r docker.io/myuser   # tagged, with a registry prefix
+scripts/build.sh --platform linux/amd64,linux/arm64 --push -r docker.io/myuser
 ```
 
-**Features:**
-
-- Automated tagging (latest, version-specific, unstable)
-- Multi-platform image publishing
-- Registry authentication handling
-- Release workflow integration
-
-### Quick Start Script (`quick-start.sh`)
-
-Provides quick commands for common development and testing operations:
+## publish.sh
 
 ```bash
-./scripts/quick-start.sh [command]
+docker login docker.io
+scripts/publish.sh -u myuser -t v0.31.0 --additional-tags latest
 ```
 
-**Available Commands:**
+Credentials are taken from an existing `docker login` session or from the
+`DOCKER_USERNAME` and `DOCKER_PASSWORD` environment variables, never from
+command-line arguments.
 
-- `setup` - Create .env file from template
-- `build` - Build the Docker image locally
-- `run` - Run with default configuration
-- `compose` - Start using Docker Compose
-- `test` - Run integration tests
-- `stop` - Stop running containers
-- `clean` - Clean up containers and images
-- `logs` - Show container logs
-- `help` - Show detailed help
-
-**Examples:**
+## e2e-test.sh
 
 ```bash
-# Quick setup and run
-./scripts/quick-start.sh setup
-./scripts/quick-start.sh run
-
-# Development workflow
-./scripts/quick-start.sh build
-./scripts/quick-start.sh compose
-
-# Testing and debugging
-./scripts/quick-start.sh test
-./scripts/quick-start.sh logs
+docker build -t onvif-media-transcoder:test .
+scripts/e2e-test.sh onvif-media-transcoder:test
 ```
 
-## Prerequisites
-
-- Docker and Docker Compose
-- Bash shell environment
-- Network access for pulling dependencies
-- For publishing: Docker Hub credentials configured
-
-## Environment Variables
-
-Scripts respect the following environment variables:
-
-- `DOCKER_REGISTRY` - Docker registry URL (default: docker.io)
-- `IMAGE_NAME` - Image name (default: w4ff1e/onvif-media-transcoder)
-- `BUILD_ARGS` - Additional Docker build arguments
-- `COMPOSE_FILE` - Docker Compose file to use
-
-## CI/CD Integration
-
-These scripts are designed to work in both local development and CI/CD environments:
-
-- **GitHub Actions** - Automated builds and publishing
-- **Local Development** - Manual testing and debugging
-- **Production Deployment** - Streamlined container management
+The test starts the image with a second MediaMTX instance and an ffmpeg test
+pattern inside the container as the input, then checks authentication (Basic,
+Digest, WS-Security), profiles, RTSP access with and without credentials,
+snapshots, WS-Discovery, idle CPU and graceful shutdown. It needs Docker,
+curl and (optionally, for the discovery probe) python3 on the host.

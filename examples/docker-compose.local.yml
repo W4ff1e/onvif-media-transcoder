@@ -1,69 +1,34 @@
-version: '3.8'
+# Build from source and run. From the repository root:
+#   docker compose --env-file .env -f examples/docker-compose.local.yml up --build
 
 services:
   onvif-media-transcoder:
-    build: .
+    build:
+      context: ..
+    image: onvif-media-transcoder:local
     container_name: onvif-media-transcoder
-    network_mode: host
     restart: unless-stopped
+    network_mode: host
     environment:
-      # Input stream configuration
       INPUT_URL: ${INPUT_URL:-https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8}
-      
-      # Service ports
       RTSP_OUTPUT_PORT: ${RTSP_OUTPUT_PORT:-8554}
-      ONVIF_PORT: ${ONVIF_PORT:-8080}
-      
-      # Device configuration
-      DEVICE_NAME: ${DEVICE_NAME:-ONVIF-Media-Transcoder}
       RTSP_PATH: ${RTSP_PATH:-/stream}
-      
-      # Authentication
+      ONVIF_PORT: ${ONVIF_PORT:-8080}
+      DEVICE_NAME: ${DEVICE_NAME:-ONVIF-Media-Transcoder}
       ONVIF_USERNAME: ${ONVIF_USERNAME:-admin}
       ONVIF_PASSWORD: ${ONVIF_PASSWORD:-onvif-rust}
-      
-      # Advanced options
       WS_DISCOVERY_ENABLED: ${WS_DISCOVERY_ENABLED:-true}
-      DEBUGLOGGING: ${DEBUGLOGGING:-false}
-    
-    # Health check to ensure service is running
+      RTSP_AUTH_ENABLED: ${RTSP_AUTH_ENABLED:-true}
+      INPUT_CHECK: ${INPUT_CHECK:-warn}
+      DEBUG_LOGGING: ${DEBUG_LOGGING:-true}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/onvif/device_service", "||", "exit", "1"]
+      test: ["CMD", "sh", "-c", "curl -fsS http://127.0.0.1:${ONVIF_PORT:-8080}/ > /dev/null"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
-    
-    # Mount logs directory for debugging (optional)
-    volumes:
-      - ./logs:/app/logs:rw
-    
-    # Logging configuration
+      start_period: 40s
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
-# Alternative configuration with port mapping
-# Use this if you cannot use host networking
-#
-# services:
-#   onvif-media-transcoder-ports:
-#     build: .
-#     container_name: onvif-media-transcoder
-#     restart: unless-stopped
-#     ports:
-#       - "8080:8080"     # ONVIF web service
-#       - "8554:8554"     # RTSP server
-#       - "3702:3702/udp" # WS-Discovery
-#     environment:
-#       INPUT_URL: ${INPUT_URL:-https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8}
-#       RTSP_OUTPUT_PORT: ${RTSP_OUTPUT_PORT:-8554}
-#       ONVIF_PORT: ${ONVIF_PORT:-8080}
-#       DEVICE_NAME: ${DEVICE_NAME:-ONVIF-Media-Transcoder}
-#       RTSP_PATH: ${RTSP_PATH:-/stream}
-#       ONVIF_USERNAME: ${ONVIF_USERNAME:-admin}
-#       ONVIF_PASSWORD: ${ONVIF_PASSWORD:-onvif-rust}
-#       WS_DISCOVERY_ENABLED: ${WS_DISCOVERY_ENABLED:-true}
-#       DEBUGLOGGING: ${DEBUGLOGGING:-false}

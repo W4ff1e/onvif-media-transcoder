@@ -1,77 +1,55 @@
-# Example Docker Compose configuration for ONVIF Media Transcoder
-# This uses the published Docker Hub images instead of building locally
-
-version: '3.8'
+# Run the published image. Copy examples/.env.example to .env, adjust it, then:
+#   docker compose --env-file .env -f examples/docker-compose.yml up -d
+#
+# Host networking is used so WS-Discovery multicast reaches the NVR and so
+# the advertised addresses are reachable. See the commented alternative
+# below if host networking is not available.
 
 services:
-  onvif-transcoder:
+  onvif-media-transcoder:
     image: w4ff1e/onvif-media-transcoder:latest
     container_name: onvif-media-transcoder
     restart: unless-stopped
-    network_mode: host  # Required for WS-Discovery multicast
+    network_mode: host
     environment:
-      # Input stream configuration
-      - INPUT_URL=${INPUT_URL:-https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8}
-      
-      # Service ports
-      - RTSP_OUTPUT_PORT=${RTSP_OUTPUT_PORT:-8554}
-      - ONVIF_PORT=${ONVIF_PORT:-8080}
-      
-      # Device configuration
-      - DEVICE_NAME=${DEVICE_NAME:-ONVIF-Media-Transcoder}
-      - RTSP_PATH=${RTSP_PATH:-/stream}
-      
-      # Authentication
-      - ONVIF_USERNAME=${ONVIF_USERNAME:-admin}
-      - ONVIF_PASSWORD=${ONVIF_PASSWORD:-onvif-rust}
-      
-      # Advanced options
-      - WS_DISCOVERY_ENABLED=${WS_DISCOVERY_ENABLED:-true}
-      - DEBUGLOGGING=${DEBUGLOGGING:-false}
-    
-    # Health check to ensure service is running
+      INPUT_URL: ${INPUT_URL:-https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8}
+      RTSP_OUTPUT_PORT: ${RTSP_OUTPUT_PORT:-8554}
+      RTSP_PATH: ${RTSP_PATH:-/stream}
+      ONVIF_PORT: ${ONVIF_PORT:-8080}
+      DEVICE_NAME: ${DEVICE_NAME:-ONVIF-Media-Transcoder}
+      ONVIF_USERNAME: ${ONVIF_USERNAME:-admin}
+      ONVIF_PASSWORD: ${ONVIF_PASSWORD:-onvif-rust}
+      WS_DISCOVERY_ENABLED: ${WS_DISCOVERY_ENABLED:-true}
+      RTSP_AUTH_ENABLED: ${RTSP_AUTH_ENABLED:-true}
+      INPUT_CHECK: ${INPUT_CHECK:-warn}
+      DEBUG_LOGGING: ${DEBUG_LOGGING:-false}
+      # CONTAINER_IP: 192.168.1.50   # set explicitly if auto-detection picks the wrong interface
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/onvif/device_service", "-d", "<?xml version=\"1.0\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Body><GetCapabilities/></soap:Body></soap:Envelope>", "-H", "Content-Type: application/soap+xml"]
+      test: ["CMD", "sh", "-c", "curl -fsS http://127.0.0.1:${ONVIF_PORT:-8080}/ > /dev/null"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
-    
-    # Resource limits (adjust based on your needs)
+      start_period: 40s
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '2.0'
-        reservations:
           memory: 512M
-          cpus: '1.0'
+          cpus: "2.0"
 
-# Alternative configuration with port mapping (if host network doesn't work)
-# Uncomment the service below and comment out the one above if needed
+# Alternative without host networking. WS-Discovery replies will carry the
+# container's internal address unless CONTAINER_IP is set to the host's IP.
 #
 # services:
-#   onvif-transcoder-ports:
+#   onvif-media-transcoder:
 #     image: w4ff1e/onvif-media-transcoder:latest
 #     container_name: onvif-media-transcoder
 #     restart: unless-stopped
 #     ports:
-#       - "8080:8080"     # ONVIF service port
-#       - "8554:8554"     # RTSP stream port
-#       - "3702:3702/udp" # WS-Discovery port (may not work across networks)
+#       - "8080:8080"
+#       - "8554:8554"
+#       - "3702:3702/udp"
 #     environment:
-#       - INPUT_URL=${INPUT_URL:-https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8}
-#       - RTSP_OUTPUT_PORT=${RTSP_OUTPUT_PORT:-8554}
-#       - ONVIF_PORT=${ONVIF_PORT:-8080}
-#       - DEVICE_NAME=${DEVICE_NAME:-ONVIF-Media-Transcoder}
-#       - RTSP_PATH=${RTSP_PATH:-/stream}
-#       - ONVIF_USERNAME=${ONVIF_USERNAME:-admin}
-#       - ONVIF_PASSWORD=${ONVIF_PASSWORD:-onvif-rust}
-#       - WS_DISCOVERY_ENABLED=${WS_DISCOVERY_ENABLED:-true}
-#       - DEBUGLOGGING=${DEBUGLOGGING:-false}
-#     healthcheck:
-#       test: ["CMD", "curl", "-f", "http://localhost:8080/onvif/device_service", "-d", "<?xml version=\"1.0\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Body><GetCapabilities/></soap:Body></soap:Envelope>", "-H", "Content-Type: application/soap+xml"]
-#       interval: 30s
-#       timeout: 10s
-#       retries: 3
-#       start_period: 10s
+#       INPUT_URL: ${INPUT_URL}
+#       CONTAINER_IP: ${CONTAINER_IP}        # the host's LAN IP
+#       ONVIF_USERNAME: ${ONVIF_USERNAME}
+#       ONVIF_PASSWORD: ${ONVIF_PASSWORD}

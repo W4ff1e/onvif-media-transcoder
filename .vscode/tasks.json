@@ -2,278 +2,51 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Rust: Build",
+            "label": "cargo: build",
             "type": "shell",
             "command": "cargo",
-            "args": [
-                "build"
-            ],
-            "group": "build",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared"
-            },
-            "problemMatcher": [
-                "$rustc"
-            ]
+            "args": ["build"],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$rustc"]
         },
         {
-            "label": "Rust: Build Release",
+            "label": "cargo: test",
             "type": "shell",
             "command": "cargo",
-            "args": [
-                "build",
-                "--release"
-            ],
-            "group": "build",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared"
-            },
-            "problemMatcher": [
-                "$rustc"
-            ]
+            "args": ["test"],
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": ["$rustc"]
         },
         {
-            "label": "Docker: Build Image",
+            "label": "cargo: clippy",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"],
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "cargo: run (debug logging)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["run", "--", "--device-name", "Dev Camera", "--debug"],
+            "problemMatcher": ["$rustc"],
+            "presentation": { "panel": "dedicated" }
+        },
+        {
+            "label": "docker: build image",
             "type": "shell",
             "command": "docker",
-            "args": [
-                "build",
-                "-t",
-                "onvif-media-transcoder",
-                "."
-            ],
-            "group": "build",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared"
-            },
+            "args": ["build", "-t", "onvif-media-transcoder:test", "."],
             "problemMatcher": []
         },
         {
-            "label": "Rust: Run Local (Demo Stream)",
+            "label": "docker: end-to-end test",
             "type": "shell",
-            "command": "cargo",
-            "args": [
-                "run",
-                "--",
-                "--rtsp-stream-url",
-                "rtsp://127.0.0.1:8554/stream",
-                "--onvif-port",
-                "8080",
-                "--device-name",
-                "Local-ONVIF-Transcoder",
-                "--onvif-username",
-                "admin",
-                "--onvif-password",
-                "onvif-rust"
-            ],
-            "group": "test",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "dedicated"
-            },
-            "problemMatcher": [
-                "$rustc"
-            ]
-        },
-        {
-            "label": "Rust: Run with WS-Discovery",
-            "type": "shell",
-            "command": "cargo",
-            "args": [
-                "run",
-                "--",
-                "--rtsp-stream-url",
-                "rtsp://127.0.0.1:8554/stream",
-                "--onvif-port",
-                "8080",
-                "--device-name",
-                "WS-Discovery-Transcoder",
-                "--onvif-username",
-                "admin",
-                "--onvif-password",
-                "onvif-rust",
-                "--ws-discovery-enabled"
-            ],
-            "group": "test",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "dedicated"
-            },
-            "problemMatcher": [
-                "$rustc"
-            ]
-        },
-        {
-            "label": "Rust: Run with Debug Mode",
-            "type": "shell",
-            "command": "cargo",
-            "args": [
-                "run",
-                "--",
-                "--rtsp-stream-url",
-                "rtsp://127.0.0.1:8554/stream",
-                "--onvif-port",
-                "8080",
-                "--device-name",
-                "Debug-ONVIF-Transcoder",
-                "--onvif-username",
-                "admin",
-                "--onvif-password",
-                "onvif-rust",
-                "--debug"
-            ],
-            "group": "test",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "dedicated"
-            },
-            "problemMatcher": [
-                "$rustc"
-            ]
-        },
-        {
-            "label": "Rust: Test",
-            "type": "shell",
-            "command": "cargo",
-            "args": [
-                "test",
-                "--",
-                "--nocapture"
-            ],
-            "group": "test",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared"
-            },
-            "problemMatcher": [
-                "$rustc"
-            ]
-        },
-        {
-            "label": "Rust: Check",
-            "type": "shell",
-            "command": "cargo",
-            "args": [
-                "check"
-            ],
-            "group": "build",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared"
-            },
-            "problemMatcher": [
-                "$rustc"
-            ]
-        },
-        {
-            "label": "Docker: Run Container (Test)",
-            "type": "shell",
-            "command": "docker",
-            "args": [
-                "run",
-                "--rm",
-                "-p",
-                "8080:8080",
-                "-p",
-                "8554:8554",
-                "-p",
-                "3702:3702/udp",
-                "onvif-media-transcoder"
-            ],
-            "group": "test",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "dedicated"
-            },
+            "command": "scripts/e2e-test.sh",
+            "args": ["onvif-media-transcoder:test"],
+            "dependsOn": "docker: build image",
             "problemMatcher": [],
-            "dependsOn": "Docker: Build Image"
-        },
-        {
-            "label": "Docker: Run Container (HLS Test)",
-            "type": "shell",
-            "command": "docker",
-            "args": [
-                "run",
-                "--rm",
-                "-e",
-                "INPUT_URL=https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8",
-                "-e",
-                "RTSP_OUTPUT_PORT=8554",
-                "-e",
-                "ONVIF_PORT=8080",
-                "-p",
-                "8080:8080",
-                "-p",
-                "8554:8554",
-                "-p",
-                "3702:3702/udp",
-                "onvif-media-transcoder"
-            ],
-            "group": "test",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "dedicated"
-            },
-            "problemMatcher": [],
-            "dependsOn": "Docker: Build Image"
-        },
-        {
-            "label": "Docker: Build and Run",
-            "dependsOrder": "sequence",
-            "dependsOn": [
-                "Docker: Build Image",
-                "Docker: Run Container (Test)"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "shared"
-            }
-        },
-        {
-            "label": "Docker: Stop All Containers",
-            "type": "shell",
-            "command": "docker",
-            "args": [
-                "stop",
-                "$(docker ps -q --filter ancestor=onvif-media-transcoder)"
-            ],
-            "group": "build",
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "shared"
-            },
-            "problemMatcher": []
+            "presentation": { "panel": "dedicated" }
         }
     ]
 }

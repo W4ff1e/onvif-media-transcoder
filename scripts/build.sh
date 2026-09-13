@@ -1,171 +1,71 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Build the Docker image, optionally for several platforms.
+set -euo pipefail
 
-set -e
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
-# Configuration
 IMAGE_NAME="onvif-media-transcoder"
-DEFAULT_TAG="latest"
-DOCKERFILE="Dockerfile"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Function to show usage
-show_usage() {
-    echo "Usage: $0 [OPTIONS]"
-    echo ""
-    echo "Build Docker image for ONVIF Media Transcoder"
-    echo ""
-    echo "Options:"
-    echo "  -t, --tag TAG          Set image tag (default: ${DEFAULT_TAG})"
-    echo "  -r, --registry REGISTRY Set registry prefix (e.g., docker.io/username)"
-    echo "  -f, --file DOCKERFILE  Dockerfile to use (default: ${DOCKERFILE})"
-    echo "      --no-cache         Build without using cache"
-    echo "      --platform PLATFORM Target platform (e.g., linux/amd64,linux/arm64)"
-    echo "  -h, --help             Show this help message"
-    echo ""
-    echo "Examples:"
-    echo "  $0                     # Build with default settings"
-    echo "  $0 -t v1.0.0          # Build with specific tag"
-    echo "  $0 -r docker.io/myuser -t v1.0.0  # Build with registry and tag"
-    echo "  $0 --platform linux/amd64,linux/arm64  # Multi-platform build"
-}
-
-# Parse command line arguments
-TAG="$DEFAULT_TAG"
+TAG="latest"
 REGISTRY=""
-NO_CACHE=""
 PLATFORM=""
+NO_CACHE=0
+PUSH=0
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -t|--tag)
-            TAG="$2"
-            shift 2
-            ;;
-        -r|--registry)
-            REGISTRY="$2"
-            shift 2
-            ;;
-        -f|--file)
-            DOCKERFILE="$2"
-            shift 2
-            ;;
-        --no-cache)
-            NO_CACHE="--no-cache"
-            shift
-            ;;
-        --platform)
-            PLATFORM="--platform $2"
-            shift 2
-            ;;
-        -h|--help)
-            show_usage
-            exit 0
-            ;;
-        *)
-            print_error "Unknown option: $1"
-            show_usage
-            exit 1
-            ;;
+usage() {
+    cat <<EOF
+Usage: scripts/build.sh [options]
+
+Options:
+  -t, --tag TAG            Image tag (default: $TAG)
+  -r, --registry PREFIX    Registry/namespace prefix, e.g. docker.io/myuser
+      --platform LIST      Target platforms, e.g. linux/amd64,linux/arm64
+      --push               Push after building (required for multi-platform)
+      --no-cache           Build without cache
+  -h, --help               Show this help
+
+Examples:
+  scripts/build.sh
+  scripts/build.sh -t v0.31.0 -r docker.io/myuser
+  scripts/build.sh --platform linux/amd64,linux/arm64 --push -r docker.io/myuser
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t|--tag) TAG="$2"; shift 2 ;;
+        -r|--registry) REGISTRY="$2"; shift 2 ;;
+        --platform) PLATFORM="$2"; shift 2 ;;
+        --push) PUSH=1; shift ;;
+        --no-cache) NO_CACHE=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     esac
 done
 
-# Construct full image name
-if [[ -n "$REGISTRY" ]]; then
-    FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${TAG}"
+FULL_IMAGE="${IMAGE_NAME}:${TAG}"
+[ -n "$REGISTRY" ] && FULL_IMAGE="${REGISTRY}/${FULL_IMAGE}"
+
+command -v docker > /dev/null 2>&1 || { echo "docker is not installed" >&2; exit 1; }
+docker info > /dev/null 2>&1 || { echo "the Docker daemon is not running" >&2; exit 1; }
+
+args=(buildx build -t "$FULL_IMAGE")
+[ "$NO_CACHE" -eq 1 ] && args+=(--no-cache)
+if [ -n "$PLATFORM" ]; then
+    args+=(--platform "$PLATFORM")
+    if [ "$PUSH" -eq 1 ]; then
+        args+=(--push)
+    else
+        echo "note: multi-platform images cannot be loaded locally; add --push to publish them" >&2
+    fi
+elif [ "$PUSH" -eq 1 ]; then
+    args+=(--push)
 else
-    FULL_IMAGE_NAME="${IMAGE_NAME}:${TAG}"
+    args+=(--load)
 fi
+args+=(.)
 
-# Validate Dockerfile exists
-if [[ ! -f "$DOCKERFILE" ]]; then
-    print_error "Dockerfile not found: $DOCKERFILE"
-    exit 1
-fi
-
-# Display build information
-echo "========================================"
-echo "ONVIF Media Transcoder - Docker Build"
-echo "========================================"
-print_status "Image name: $FULL_IMAGE_NAME"
-print_status "Dockerfile: $DOCKERFILE"
-print_status "Build context: $(pwd)"
-if [[ -n "$PLATFORM" ]]; then
-    print_status "Platform: ${PLATFORM#--platform }"
-fi
-if [[ -n "$NO_CACHE" ]]; then
-    print_warning "Building without cache"
-fi
-echo ""
-
-# Check if Docker is available
-if ! command -v docker &> /dev/null; then
-    print_error "Docker is not installed or not in PATH"
-    exit 1
-fi
-
-# Check if Docker daemon is running
-if ! docker info &> /dev/null; then
-    print_error "Docker daemon is not running"
-    exit 1
-fi
-
-# Start build
-print_status "Starting Docker build..."
-echo ""
-
-# Construct Docker build command
-BUILD_CMD="docker build $NO_CACHE $PLATFORM -f $DOCKERFILE -t $FULL_IMAGE_NAME ."
-
-# Show the command being executed
-print_status "Executing: $BUILD_CMD"
-echo ""
-
-# Execute the build
-if eval "$BUILD_CMD"; then
-    echo ""
-    print_success "Docker image built successfully!"
-    print_success "Image: $FULL_IMAGE_NAME"
-    
-    # Show image information
-    echo ""
-    print_status "Image information:"
-    docker images "$FULL_IMAGE_NAME" --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}"
-    
-    # Show example run command
-    echo ""
-    print_status "Example run command:"
-    echo "docker run --rm -p 8080:8080 -p 8554:8554 $FULL_IMAGE_NAME"
-    
-else
-    echo ""
-    print_error "Docker build failed!"
-    exit 1
-fi
-
-echo ""
-echo "========================================"
-print_success "Build completed successfully!"
-echo "========================================"
+echo "Building $FULL_IMAGE"
+docker "${args[@]}"
+echo "Done: $FULL_IMAGE"
+[ "$PUSH" -eq 1 ] || echo "Run it with: docker run --rm --network host $FULL_IMAGE"

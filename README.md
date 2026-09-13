@@ -1,261 +1,246 @@
 # ONVIF Media Transcoder
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/W4ff1e/onvif-media-transcoder/docker-publish.yml?branch=main&label=build)](https://github.com/W4ff1e/onvif-media-transcoder/actions/workflows/docker-publish.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/W4ff1e/onvif-media-transcoder/ci.yml?branch=main&label=CI)](https://github.com/W4ff1e/onvif-media-transcoder/actions/workflows/ci.yml)
 [![Docker Hub](https://img.shields.io/docker/pulls/w4ff1e/onvif-media-transcoder?logo=docker)](https://hub.docker.com/r/w4ff1e/onvif-media-transcoder)
 [![Docker Image Version](https://img.shields.io/docker/v/w4ff1e/onvif-media-transcoder?logo=docker&sort=semver)](https://hub.docker.com/r/w4ff1e/onvif-media-transcoder/tags)
 [![Docker Image Size](https://img.shields.io/docker/image-size/w4ff1e/onvif-media-transcoder/latest?logo=docker)](https://hub.docker.com/r/w4ff1e/onvif-media-transcoder)
-[![ONVIF](https://img.shields.io/badge/ONVIF-compatible-green.svg)](https://www.onvif.org/)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](https://www.rust-lang.org)
 [![Security](https://img.shields.io/badge/security-policy-red.svg)](SECURITY.md)
 
-> ⚠️ **AI-Generated Code Warning**: This project contains code generated with the assistance of AI tools
-> (GitHub Copilot). While thoroughly tested, this software is provided as-is and may not be suitable for
-> production environments without proper review, testing, and validation by qualified developers.
-> Use at your own risk.
+Turns any stream MediaMTX can pull (HLS, RTSP, RTMP, SRT, UDP) into an ONVIF
+Profile S camera with WS-Discovery, so NVRs that only speak ONVIF, such as
+UniFi Protect's third-party camera support, can adopt it like a real camera.
 
-## Overview
+> **AI-assisted project**: much of this code was written with AI tools and then
+> reviewed and tested. Review it yourself before relying on it, and keep the
+> ONVIF and RTSP ports off untrusted networks.
 
-A Rust-based ONVIF Media Transcoder that converts media streams (RTSP, HTTP, etc.) into ONVIF-compatible RTSP streams.
-It includes a built-in WS-Discovery server for device discovery.
+## How it works
 
-## Table of Contents
+```text
+ HLS / RTSP / RTMP / SRT          ┌──────────────────────── container ────────────────────────┐
+ source stream  ───────────────▶  │  MediaMTX  ── re-mux, no re-encode ──▶  RTSP :8554 (auth) │
+                                  │      ▲                                                     │
+                                  │      │ probes codec/resolution, grabs snapshots (ffmpeg)   │
+                                  │  ONVIF service (Rust) ─▶ SOAP :8080  ─▶ device + media ops │
+                                  │  WS-Discovery responder ─▶ UDP 3702 multicast              │
+                                  └────────────────────────────────────────────────────────────┘
+                                                      ▲            ▲              ▲
+                                            NVR discovers,  reads profiles,  plays RTSP with
+                                            (Probe/Hello)   stream + snapshot   the same credentials
+```
 
-- [ONVIF Media Transcoder](#onvif-media-transcoder)
-  - [Overview](#overview)
-  - [Features](#features)
-  - [Quick Start](#quick-start)
-  - [Architecture](#architecture)
-  - [ONVIF Compatibility](#onvif-compatibility)
-  - [Testing](#testing)
-  - [Troubleshooting](#troubleshooting)
-  - [Development](#development)
-  - [Contributing](#contributing)
-  - [Security](#security)
-  - [License](#license)
-  - [Authors](#authors)
+- **MediaMTX** pulls the input and serves it as RTSP without re-encoding.
+- The **ONVIF service** answers device and media SOAP operations, authenticates
+  with HTTP Basic, HTTP Digest or WS-Security, and serves JPEG snapshots.
+- The **WS-Discovery responder** answers probes so the camera appears in the
+  NVR's discovery list.
 
-## Features
+## Quick start
 
-- [x] **Input Stream Support**: Re-mux MediaMTX-compatible input (HLS, MP4, RTSP, HTTP streams)
-- [x] **ONVIF Compliance**: ONVIF Profile S compatibility with standard endpoints
-- [x] **Network Discovery**: WS-Discovery implementation for device detection
-- [x] **Authentication**: HTTP Basic, HTTP Digest, and WS-Security support
-- [x] **Stream Re-muxing**: Direct stream re-muxing without re-encoding, minimal latency
+```bash
+docker run --rm --network host \
+  -e INPUT_URL="https://your-stream.example/live/index.m3u8" \
+  -e DEVICE_NAME="Front Door" \
+  -e ONVIF_USERNAME="camera" \
+  -e ONVIF_PASSWORD="change-me-please" \
+  w4ff1e/onvif-media-transcoder:latest
+```
 
-## Quick Start
+Then add a third-party ONVIF camera in your NVR. It should be discovered
+automatically; otherwise enter `http://<host-ip>:8080/onvif/device_service`
+with the username and password above. The same credentials are used for the
+RTSP stream.
 
-### Quick Start Script
+Other ways to run it:
 
 ```bash
 git clone https://github.com/W4ff1e/onvif-media-transcoder.git
 cd onvif-media-transcoder
-./scripts/quick-start.sh run
+scripts/quick-start.sh setup     # creates .env from examples/.env.example
+scripts/quick-start.sh run       # builds the image and runs it
 ```
 
-### Docker Run
+or with Compose using [`examples/docker-compose.yml`](examples/README.md).
 
-```bash
-# Run with default demo stream
-docker run --rm --network host w4ff1e/onvif-media-transcoder:latest
+`--network host` is recommended: WS-Discovery is multicast, and the device
+advertises its own address, which must be reachable by the NVR. Without host
+networking, publish `8080/tcp`, `8554/tcp`, `3702/udp` and set `CONTAINER_IP`
+to the Docker host's LAN address.
 
-# Run with custom stream and credentials
-docker run --rm --network host \
-  -e INPUT_URL="https://your-stream.m3u8" \
-  -e DEVICE_NAME="My-Custom-Camera" \
-  -e ONVIF_USERNAME="myuser" \
-  -e ONVIF_PASSWORD="mypassword" \
-  w4ff1e/onvif-media-transcoder:latest
-```
+### Image tags
 
-### Available Docker Tags
+- `latest`: latest release
+- `unstable`: latest commit on `main` that passed CI
+- `0.31.0`, `0.31`: specific releases
 
-- **`latest`**: Latest stable release
-- **`unstable`**: Latest commit to main branch
-- **`v0.x.x`**: Specific version releases
+## Configuration
 
-### Environment Variables
+Everything is configured through environment variables.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `INPUT_URL` | Demo HLS stream | Source video stream URL |
-| `RTSP_OUTPUT_PORT` | `8554` | RTSP server port |
-| `RTSP_PATH` | `/stream` | RTSP stream path |
-| `ONVIF_PORT` | `8080` | ONVIF web service port |
-| `DEVICE_NAME` | `ONVIF-Media-Transcoder` | Camera device name |
-| `ONVIF_USERNAME` | `admin` | ONVIF authentication username |
-| `ONVIF_PASSWORD` | `onvif-rust` | ONVIF authentication password |
-| `WS_DISCOVERY_ENABLED` | `true` | Enable WS-Discovery service |
-| `DEBUGLOGGING` | `false` | Enable debug logging |
+| `INPUT_URL` | Demo HLS stream | Source stream. Any URL MediaMTX can pull (`http(s)://` HLS, `rtsp://`, `rtsps://`, `rtmp://`, `srt://`, `udp://`). Local files are not supported. |
+| `INPUT_CHECK` | `warn` | Behaviour when the input is unreachable at start: `warn` (MediaMTX keeps retrying), `fail` (exit), `skip` |
+| `RTSP_OUTPUT_PORT` | `8554` | RTSP port for the re-muxed stream |
+| `RTSP_PATH` | `/stream` | RTSP path |
+| `RTSP_AUTH_ENABLED` | `true` | Require the ONVIF credentials for RTSP playback |
+| `ONVIF_PORT` | `8080` | ONVIF HTTP/SOAP port |
+| `DEVICE_NAME` | `ONVIF-Media-Transcoder` | Name shown in discovery and as the model |
+| `ONVIF_USERNAME` | `admin` | Username for ONVIF, RTSP and snapshots |
+| `ONVIF_PASSWORD` | `onvif-rust` | Password. **Change it.** At least 6 characters. |
+| `WS_DISCOVERY_ENABLED` | `true` | Answer WS-Discovery probes on UDP 3702 |
+| `CONTAINER_IP` | auto-detected | IPv4 address advertised to clients |
+| `DEBUG_LOGGING` | `false` | Verbose logging. Logs credentials; development only. `DEBUGLOGGING` is accepted as an alias. |
+| `RUST_LOG` | unset | Fine-grained log filter, e.g. `onvif_media_transcoder=debug`; overrides `DEBUG_LOGGING` |
 
-**Note**: `--network host` is recommended for WS-Discovery to work across network boundaries.
+Boolean variables accept `true/false`, `yes/no`, `on/off` and `1/0`.
 
-## Architecture
+## ONVIF compatibility
 
-The service consists of three components:
+Profile S device with one fixed media profile (`Profile_1`). The profile's
+codec, resolution, frame rate and bitrate are probed from the live stream
+with ffprobe; until the probe succeeds, sensible defaults are reported.
 
-1. **ONVIF Service (Rust)**: SOAP web service for device management.
-2. **WS-Discovery Service (Rust)**: Multicast discovery service.
-3. **MediaMTX**: RTSP server for stream re-muxing.
+**Device service** (`/onvif/device_service`): `GetCapabilities`, `GetServices`,
+`GetServiceCapabilities`, `GetSystemDateAndTime`, `GetDeviceInformation`,
+`GetHostname`, `GetScopes`, `GetWsdlUrl`.
 
-```text
-┌─────────────────┐    ┌─────────────────┐
-│   Input Stream  │──▶│    MediaMTX     │
-│  (HLS/MP4/etc)  │    │ Re-mux & RTSP   │
-└─────────────────┘    └────────┬────────┘
-                                │
-                                ▼
-┌─────────────────┐    ┌─────────────────┐
-│  ONVIF Clients  │◀──│  ONVIF Service  │
-│                 │    │   (Port 8080)   │
-└────────┬────────┘    └────────┬────────┘
-         │                      │
-         ▼                      ▲
-┌─────────────────┐    ┌─────────────────┐
-│  WS-Discovery   │──▶│     Device      │
-│   (Port 3702)   │    │   Discovery     │
-└─────────────────┘    └─────────────────┘
-```
+**Media service** (`/onvif/media_service`): `GetServiceCapabilities`,
+`GetProfiles`, `GetProfile`, `GetStreamUri`, `GetSnapshotUri`,
+`GetVideoSources`, `GetVideoSourceConfigurations`, `GetVideoSourceConfiguration`,
+`GetVideoEncoderConfigurations`, `GetVideoEncoderConfiguration`,
+`GetVideoEncoderConfigurationOptions`, `GetAudioSourceConfigurations`,
+`GetAudioEncoderConfigurations` (no audio is exposed).
 
-## ONVIF Compatibility
-
-### Supported Endpoints
-
-**Device Service** (`/onvif/device_service`):
-
-- `GetCapabilities`, `GetDeviceInformation`
-
-**Media Service** (`/onvif/media_service`):
-
-- `GetProfiles`, `GetStreamUri`, `GetVideoSources`, `GetServiceCapabilities`
+Operations are matched on the SOAP body, so either service path accepts either
+set. Anything else returns a `ter:ActionNotSupported` fault. `/snapshot.jpg`
+serves a JPEG frame.
 
 ### Authentication
 
-> ⚠️ **Warning**: The authentication implementation is custom-built.
-> **It is strongly recommended to restrict access at the network level.**
+`GetCapabilities`, `GetServices`, `GetServiceCapabilities`,
+`GetSystemDateAndTime`, `GetHostname` and `GetWsdlUrl` are public, as the ONVIF
+specification requires for discovery. Everything else, including snapshots,
+needs credentials via one of:
 
-- **Methods**: HTTP Basic, HTTP Digest, WS-Security (PasswordDigest/PasswordText)
-- **Default**: `admin` / `onvif-rust`
+- HTTP Digest (RFC 7616, `qop=auth`, server-issued nonces with replay protection)
+- HTTP Basic
+- WS-Security UsernameToken (`PasswordDigest` with a 5 minute `Created` window, or `PasswordText`)
+
+RTSP playback uses the same credentials (Basic) unless `RTSP_AUTH_ENABLED=false`.
+The `GetStreamUri` response contains the plain RTSP URL; ONVIF clients apply the
+device credentials themselves.
 
 ### Discovery
 
-- **Protocol**: WS-Discovery (UDP 3702)
-- **Multicast**: `239.255.255.250:3702`
+WS-Discovery (April 2005) on `239.255.255.250:3702`. The device sends `Hello`
+on start and every 60 s, answers `Probe` messages for
+`NetworkVideoTransmitter`/`Device` types, and sends `Bye` on shutdown. The
+endpoint reference is derived from `DEVICE_NAME`, so the same name is
+recognised as the same device across restarts.
 
 ## Testing
 
-### Manual Testing
+```bash
+# Unit and socket-level tests
+cargo test
+
+# Full container test with an in-container source (no internet needed)
+docker build -t onvif-media-transcoder:test .
+scripts/e2e-test.sh onvif-media-transcoder:test
+```
+
+Manual checks against a running container:
 
 ```bash
-# Test device discovery
-curl -X POST http://localhost:8080/onvif/device_service \
-  -H "Content-Type: application/soap+xml" \
-  -d '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetCapabilities/></soap:Body></soap:Envelope>'
+# Public operation
+curl -s -X POST http://localhost:8080/onvif/device_service \
+  -H 'Content-Type: application/soap+xml' \
+  -d '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><GetCapabilities/></s:Body></s:Envelope>'
 
-# Test RTSP stream
-ffprobe rtsp://localhost:8554/stream
+# Protected operation with HTTP Digest
+curl -s --digest -u admin:onvif-rust -X POST http://localhost:8080/onvif/media_service \
+  -H 'Content-Type: application/soap+xml' \
+  -d '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><GetProfiles/></s:Body></s:Envelope>'
+
+# Stream and snapshot
+ffprobe -rtsp_transport tcp rtsp://admin:onvif-rust@localhost:8554/stream
+curl --digest -u admin:onvif-rust -o snapshot.jpg http://localhost:8080/snapshot.jpg
 ```
 
 ## Troubleshooting
 
-- **WS-Discovery**: Use `--network host`. Ensure UDP 3702 is open.
-- **Connection**: Check ports 8080/8554. Verify credentials.
-- **Logs**: Check container logs for details.
+- **Not discovered**: use `--network host`; make sure UDP 3702 multicast is
+  allowed between the NVR and the host; check the logs for `sent Hello`.
+- **Discovered but adoption fails**: the advertised address must be reachable
+  from the NVR. Check the `container ip` log line and set `CONTAINER_IP` if
+  it is wrong.
+- **Stream will not play**: the RTSP stream needs the ONVIF credentials.
+  Test with `ffprobe rtsp://user:pass@host:8554/stream`. Set
+  `RTSP_AUTH_ENABLED=false` to compare.
+- **Input unreachable**: the container logs a warning and MediaMTX retries.
+  Set `INPUT_CHECK=fail` if you prefer a hard failure.
+- **More detail**: `DEBUG_LOGGING=true` or `RUST_LOG=debug`.
 
 ## Development
 
-### Prerequisites
-
-- Docker
-- Rust 1.70+ (for local dev)
-
-### Building
+Requirements: Rust 1.87 or newer, Docker. ffmpeg/ffprobe are optional locally
+(snapshots and stream probing fall back gracefully without them).
 
 ```bash
-# Build with Docker
-docker build -t onvif-media-transcoder .
-
-# Build locally
-cargo build --release
+cargo fmt --all
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo run -- --help         # every flag has an environment variable equivalent
 ```
 
-Project structure:
+See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for running the
+service outside the container and the VS Code setup.
 
 ```text
-├── src/                     # Rust source code
-│   ├── lib.rs               # Library root
-│   ├── main.rs              # Application entry point
-│   ├── config.rs            # Configuration management
-│   ├── ws_discovery.rs      # WS-Discovery implementation
-│   └── onvif/               # ONVIF logic
-│       ├── mod.rs           # Request handling
-│       ├── endpoints.rs     # Constants
-│       └── responses.rs     # SOAP templates
-├── examples/                # Example configurations
-├── scripts/                 # Utility scripts
-├── docs/                    # Documentation
-├── Dockerfile               # Multi-stage build
-├── entrypoint.sh            # Service orchestration
-└── mediamtx.yml             # MediaMTX configuration
+├── src/
+│   ├── main.rs              # start-up, signal handling, thread orchestration
+│   ├── config.rs            # clap configuration (flags and environment)
+│   ├── identity.rs          # device identity shared by discovery and SOAP
+│   ├── ws_discovery.rs      # WS-Discovery responder
+│   └── onvif/
+│       ├── mod.rs           # HTTP server, authentication gate, dispatch
+│       ├── auth.rs          # Basic, Digest and WS-Security validation
+│       ├── soap.rs          # SOAP parsing and envelope/fault builders
+│       ├── responses.rs     # ONVIF response templates
+│       ├── stream_info.rs   # ffprobe-based stream description
+│       ├── snapshot.rs      # ffmpeg snapshot capture
+│       └── process.rs       # external commands with timeouts
+├── tests/                   # socket-level integration tests
+├── scripts/                 # build, publish, quick start, end-to-end test
+├── examples/                # Compose files and .env template
+├── Dockerfile               # multi-stage build, non-root runtime image
+└── entrypoint.sh            # validation, MediaMTX config, supervision
 ```
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an
-issue first to discuss what you would like to change.
-
-**Code Guidelines:**
-
-- This project uses AI-assisted development with GitHub Copilot
-- All contributions should be reviewed and tested before merging
-- Ensure proper error handling and documentation
-- Follow existing code patterns and style
-- Add tests and update documentation as needed
-
-Please make sure to update tests as appropriate and follow the existing code style.
+Pull requests are welcome. For larger changes, open an issue first. CI runs
+`cargo fmt`, `clippy -D warnings`, tests, `cargo deny`, shellcheck, hadolint,
+markdownlint and the container end-to-end test; please make sure they pass.
 
 ## Security
 
-Security is an important consideration for ONVIF Media Transcoder, especially given its network-exposed
-services and authentication mechanisms.
-
-### Important Security Notice
-
-⚠️ This project contains AI-generated code and should undergo security review before production deployment.
-
-### Key Security Considerations
-
-- **Default Credentials**: Change the default `admin`/`onvif-rust` credentials in production
-- **Network Exposure**: Multiple services (ONVIF, RTSP, WS-Discovery) are exposed by default
-- **Authentication**: Supports multiple methods including WS-Security
-- **Container Security**: Regular vulnerability scanning and security updates
-
-### Reporting Security Issues
-
-Please report security vulnerabilities responsibly:
-
-- Use [GitHub Security Advisories](https://github.com/W4ff1e/onvif-media-transcoder/security/advisories)
-
-For detailed security information, deployment best practices, and vulnerability reporting procedures,
-see the [**Security Policy**](SECURITY.md).
+Change the default credentials, keep the ONVIF and RTSP ports on a trusted
+network, and read [SECURITY.md](SECURITY.md) for details and how to report
+vulnerabilities.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-**Disclaimer**: This software is provided "AS IS" without warranty of any kind. The use of AI-generated
-code components requires additional validation and testing before deployment in production environments.
+MIT. See [LICENSE](LICENSE). Provided as is, without warranty.
 
 ## Authors
 
-- [@W4ff1e](https://github.com/W4ff1e) - Initial work and maintenance
-- [GitHub Copilot](https://github.com/features/copilot) - Pair programming and code assistance
+- [@W4ff1e](https://github.com/W4ff1e): initial work and maintenance, with
+  AI-assisted development
 
 ## Stats
 
 ![Alt](https://repobeats.axiom.co/api/embed/f19d8fae5d95fd971fe46aa847f9f23b9e278420.svg "Repobeats analytics image")
-
----
-
-<!--markdownlint-disable-next-line -->
-**Made with :yellow_heart: by [Waffle](https://github.com/W4ff1e) in collaboration with GitHub Copilot**

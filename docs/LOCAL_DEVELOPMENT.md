@@ -1,241 +1,118 @@
-# Local Development and Testing
+# Local development
 
-This guide explains how to run and test the ONVIF Media Transcoder locally without Docker.
+How to build, run and test the ONVIF service outside the container.
 
 ## Prerequisites
 
-- [Rust](https://rustlang.org) 1.70 or later
-- VS Code with Rust extensions (recommended)
-- [MediaMTX](https://github.com/bluenviron/mediamtx) (for stream re-muxing, if testing with local streams)
+- [Rust](https://www.rust-lang.org/tools/install) 1.87 or newer
+- Docker, for the image and the end-to-end test
+- Optional: `ffmpeg`/`ffprobe` for snapshots and stream probing, and
+  [MediaMTX](https://github.com/bluenviron/mediamtx) if you want a real RTSP
+  stream behind the service
 
-## Local Development Setup
+## Running
 
-### Option 1: Using VS Code Tasks (Recommended)
-
-1. Open the project in VS Code
-2. Use `Ctrl+Shift+P` → "Tasks: Run Task" and choose:
-   - **"Rust: Run Local (Demo Stream)"** - Runs with demo HLS stream
-   - **"Rust: Test"** - Runs all unit tests
-   - **"Rust: Check"** - Checks code without running
-   - **"Rust: Build"** - Builds the project
-   - **"Rust: Build Release"** - Builds optimized release version
-
-### Option 2: Command Line with Environment Variables
-
-The application supports both environment variables and command-line arguments:
+Every option is a flag and an environment variable; `cargo run -- --help`
+lists them.
 
 ```bash
-# Using command-line arguments (recommended for local development)
+# Flags
 cargo run -- \
-  --rtsp-stream-url "rtsp://127.0.0.1:8554/stream" \
-  --onvif-port "8080" \
-  --device-name "Local-ONVIF-Transcoder" \
-  --onvif-username "admin" \
-  --onvif-password "onvif-rust" \
-  --container-ip "127.0.0.1" \
-  --ws-discovery-enabled \
-  --debug
+  --rtsp-stream-url rtsp://127.0.0.1:8554/stream \
+  --onvif-port 8080 \
+  --device-name "Dev Camera" \
+  --onvif-username admin --onvif-password onvif-rust \
+  --container-ip 127.0.0.1 \
+  --ws-discovery-enabled --debug
 
-# Show help for all available options
-cargo run -- --help
+# Environment variables (what the container does)
+RTSP_STREAM_URL=rtsp://127.0.0.1:8554/stream ONVIF_PORT=8080 \
+DEVICE_NAME="Dev Camera" WS_DISCOVERY_ENABLED=true cargo run
 ```
 
-### Option 3: Local Development without MediaMTX
+| Flag | Environment variable | Default |
+| :--- | :--- | :--- |
+| `--rtsp-stream-url` | `RTSP_STREAM_URL` | `rtsp://127.0.0.1:8554/stream` |
+| `--onvif-port` | `ONVIF_PORT` | `8080` |
+| `--device-name` | `DEVICE_NAME` | `ONVIF-Media-Transcoder` |
+| `--onvif-username` | `ONVIF_USERNAME` | `admin` |
+| `--onvif-password` | `ONVIF_PASSWORD` | `onvif-rust` |
+| `--container-ip` | `CONTAINER_IP` | `127.0.0.1` |
+| `--ws-discovery-enabled` | `WS_DISCOVERY_ENABLED` | `false` |
+| `--debug` | `DEBUG_LOGGING` | `false` |
 
-For testing ONVIF functionality without setting up MediaMTX:
+The service starts without a stream behind the RTSP URL; SOAP operations work,
+`GetStreamUri` returns the configured URL, and snapshots return HTTP 502 until
+the stream exists. `RUST_LOG` (for example `RUST_LOG=onvif_media_transcoder=debug`)
+overrides `--debug`.
+
+### With a local stream
 
 ```bash
-# Point to any accessible RTSP stream (even if it doesn't exist)
-# The ONVIF service will start and provide endpoints
-cargo run -- \
-  --rtsp-stream-url "rtsp://localhost:8554/nonexistent" \
-  --onvif-port "8080" \
-  --device-name "Test-Device"
+# Terminal 1: an RTSP server
+mediamtx
+
+# Terminal 2: a test pattern published to it
+ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=25 -c:v libx264 -preset ultrafast \
+  -f rtsp rtsp://127.0.0.1:8554/stream
+
+# Terminal 3: the ONVIF service
+cargo run -- --debug
 ```
 
-## Running Tests
-
-### Unit Tests
+## Tests
 
 ```bash
-# Run all tests
-cargo test
-
-# Run tests with output
-cargo test -- --nocapture
-
-# Run specific test module
-cargo test authentication
-
-# Run tests in parallel (default) or serial
-cargo test -- --test-threads=1
+cargo test                       # unit tests plus socket-level integration tests
+cargo test -- --nocapture        # with log output
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check
+cargo deny check                 # advisories, licenses, bans (cargo install cargo-deny)
 ```
 
-### Integration Testing
+The integration tests in `tests/integration_test.rs` start the real HTTP
+server on a random port and exercise Basic and Digest authentication, replay
+protection, split TCP writes and large bodies.
 
-For integration testing, you'll need a running stream source. You can use MediaMTX or any RTSP-compatible stream:
+For the container:
 
 ```bash
-```bash
-# Example with MediaMTX or any RTSP-compatible stream
-# 1. Start your stream source (MediaMTX, camera, etc.)
-# 2. Run the ONVIF service pointing to the stream
-cargo run -- --rtsp-stream-url "rtsp://127.0.0.1:8554/your-stream"
-
-# For testing ONVIF endpoints without a real stream:
-# The ONVIF service will provide device information and media profiles
-# even if the RTSP stream is not accessible (streams are referenced, not validated)
-cargo run -- --rtsp-stream-url "rtsp://localhost:8554/test-stream"
+docker build -t onvif-media-transcoder:test .
+scripts/e2e-test.sh onvif-media-transcoder:test
 ```
 
-## Test Coverage
-
-The test suite covers:
-
-- ✅ **Authentication**: Basic Auth, Digest Auth, WS-Security
-- ✅ **Configuration**: Environment variable parsing and validation
-- ✅ **ONVIF Endpoints**: Public vs protected endpoint detection
-- ✅ **Request Parsing**: Authorization header extraction and validation
-- ✅ **Error Handling**: Unsupported endpoint detection and error responses
-- ✅ **Command Line Interface**: Argument parsing and help generation
-
-## VS Code Integration
-
-The project includes pre-configured VS Code tasks and debugging:
-
-### Available Tasks
-
-- **Build Tasks**: Standard Rust build and release builds
-- **Test Tasks**: Unit tests and code checking
-- **Local Run Tasks**: Pre-configured environment for local testing
-- **Docker Tasks**: Container building and testing
-
-Access tasks via `Ctrl+Shift+P` → "Tasks: Run Task"
-
-### Debugging
-
-1. Set breakpoints in the code
-2. Press `F5` to start debugging
-3. VS Code will use the pre-configured debug settings with environment variables
-
-The debugger is configured with default environment variables for local testing.
-
-## Configuration Options
-
-### Environment Variables (Docker vs Local Development)
-
-**For Docker deployments**, use these environment variables (handled by entrypoint.sh):
-
-| Variable               | Default                  | Description                       |
-| ---------------------- | ------------------------ | --------------------------------- |
-| `INPUT_URL`            | Demo HLS stream          | Source stream URL for MediaMTX    |
-| `RTSP_OUTPUT_PORT`     | `8554`                   | RTSP server output port           |
-| `RTSP_PATH`            | `/stream`                | RTSP stream path                  |
-| `ONVIF_PORT`           | `8080`                   | ONVIF service port                |
-| `DEVICE_NAME`          | `ONVIF-Media-Transcoder` | Device identifier                 |
-| `ONVIF_USERNAME`       | `admin`                  | Authentication username           |
-| `ONVIF_PASSWORD`       | `onvif-rust`             | Authentication password           |
-| `WS_DISCOVERY_ENABLED` | `true`                   | Enable WS-Discovery service       |
-| `DEBUGLOGGING`         | `false`                  | Enable debug logging (sensitive!) |
-
-**For local development**, the Rust application uses command-line arguments:
-
-| CLI Argument             | Default                        | Description                       |
-| ------------------------ | ------------------------------ | --------------------------------- |
-| `--rtsp-stream-url`      | `rtsp://127.0.0.1:8554/stream` | Source RTSP stream URL            |
-| `--onvif-port`           | `8080`                         | ONVIF service port                |
-| `--device-name`          | `ONVIF-Media-Transcoder`       | Device identifier                 |
-| `--onvif-username`       | `admin`                        | Authentication username           |
-| `--onvif-password`       | `onvif-rust`                   | Authentication password           |
-| `--container-ip`         | `127.0.0.1`                    | IP address for service binding    |
-| `--ws-discovery-enabled` | (flag)                         | Enable WS-Discovery service       |
-| `--debug`                | (flag)                         | Enable debug logging (sensitive!) |
-
-### Command Line Arguments
-
-All environment variables have corresponding command-line arguments. Use `cargo run -- --help` to see all available options.
-
-## Testing ONVIF Endpoints
-
-Once running locally, test with:
+## Manual requests
 
 ```bash
-# Test device capabilities (no auth required)
-curl -X POST http://localhost:8080/onvif/device_service \
-  -H "Content-Type: application/soap+xml" \
-  -d '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetCapabilities/></soap:Body></soap:Envelope>'
+# Public operation, no credentials
+curl -s -X POST http://localhost:8080/onvif/device_service \
+  -H 'Content-Type: application/soap+xml' \
+  -d '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><GetCapabilities/></s:Body></s:Envelope>'
 
-# Test media profiles (with Basic Auth)
-curl -X POST http://localhost:8080/onvif/media_service \
-  -H "Content-Type: application/soap+xml" \
-  -u admin:onvif-rust \
-  -d '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetProfiles/></soap:Body></soap:Envelope>'
+# HTTP Digest
+curl -s --digest -u admin:onvif-rust -X POST http://localhost:8080/onvif/media_service \
+  -H 'Content-Type: application/soap+xml' \
+  -d '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><GetProfiles/></s:Body></s:Envelope>'
 
-# Test with WS-Security authentication
-curl -X POST http://localhost:8080/onvif/media_service \
-  -H "Content-Type: application/soap+xml" \
-  -d '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><soap:Header><wsse:Security><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">onvif-rust</wsse:Password></wsse:UsernameToken></wsse:Security></soap:Header><soap:Body><GetProfiles/></soap:Body></soap:Envelope>'
+# WS-Security PasswordText
+curl -s -X POST http://localhost:8080/onvif/media_service \
+  -H 'Content-Type: application/soap+xml' \
+  -d '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><s:Header><wsse:Security><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">onvif-rust</wsse:Password></wsse:UsernameToken></wsse:Security></s:Header><s:Body><GetProfiles/></s:Body></s:Envelope>'
 ```
 
-## Development Workflow
+## VS Code
 
-### Typical Development Cycle
-
-1. **Code Changes**: Edit Rust source files
-2. **Check Syntax**: `cargo check` (fast syntax checking)
-3. **Run Tests**: `cargo test` (verify functionality)
-4. **Local Testing**: `cargo run` (test with real requests)
-5. **Docker Testing**: `./scripts/build.sh && docker run ...` (container testing)
-
-### Performance Testing
-
-```bash
-# Build optimized version
-cargo build --release
-
-# Run with release build
-./target/release/onvif-media-transcoder --help
-
-# Profile with tools
-cargo install flamegraph
-sudo cargo flamegraph --root -- --onvif-port 8080
-```
-
-### Code Quality
-
-```bash
-# Format code
-cargo fmt
-
-# Lint code
-cargo clippy
-
-# Check dependencies
-cargo audit
-
-# Generate documentation
-cargo doc --open
-```
+`.vscode/tasks.json` provides build, test, clippy and run tasks, and
+`.vscode/launch.json` provides debug configurations for the
+[CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb)
+extension. Press `F5` to build and debug with the default flags.
 
 ## Troubleshooting
 
-### Common Issues
-
-1. **Port Already in Use**: Change `ONVIF_PORT` or stop conflicting services
-2. **Stream Not Found**: Verify the RTSP stream URL is accessible and the source is running
-3. **Authentication Failing**: Check command-line arguments for username/password
-4. **WS-Discovery Not Working**: Ensure proper network interfaces and permissions (may require sudo on some systems)
-
-### Debug Logging
-
-Enable debug logging for detailed request/response information:
-
-```bash
-# Enable debug logging (WARNING: logs sensitive information)
-cargo run -- --debug
-
-# Or use RUST_LOG for more granular control
-RUST_LOG=debug cargo run
-```
-
-**Warning**: Debug logging may expose sensitive authentication information. Only use in development environments.
+- **Port already in use**: change `--onvif-port`, or stop the other process.
+  WS-Discovery shares UDP 3702 with other responders via `SO_REUSEADDR`.
+- **WS-Discovery does nothing locally**: the responder joins the multicast
+  group on `--container-ip`; use the address of a real interface rather than
+  `127.0.0.1` when probing from another machine.
+- **Authentication fails**: with Digest, the `uri` in the `Authorization`
+  header must match the request path, and nonces expire after 5 minutes.
