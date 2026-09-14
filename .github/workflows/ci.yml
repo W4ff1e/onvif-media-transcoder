@@ -96,6 +96,7 @@ jobs:
           globs: |
             **/*.md
             !target/**
+            !.claude/**
 
   docker:
     name: Docker image end-to-end
