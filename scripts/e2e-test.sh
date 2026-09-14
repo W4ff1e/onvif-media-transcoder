@@ -169,7 +169,13 @@ if [ "$EXIT_CODE" = 0 ] && awk -v t="$STOP_SECONDS" 'BEGIN { exit !(t < 8) }'; t
 else
     fail "stop took ${STOP_SECONDS}s, exit code ${EXIT_CODE}"
 fi
-docker logs "$NAME" 2>&1 | grep -q "sent Bye" && pass "WS-Discovery Bye sent on shutdown" || fail "no Bye on shutdown"
+# The log driver can lag a moment behind container exit; poll briefly.
+BYE_SEEN=0
+for _ in $(seq 1 20); do
+    if docker logs "$NAME" 2>&1 | grep -q "sent Bye"; then BYE_SEEN=1; break; fi
+    sleep 0.5
+done
+[ "$BYE_SEEN" -eq 1 ] && pass "WS-Discovery Bye sent on shutdown" || fail "no Bye on shutdown"
 
 if [ "$FAILED" -ne 0 ]; then
     echo "== container logs (tail)"
