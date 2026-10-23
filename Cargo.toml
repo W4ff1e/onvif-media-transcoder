@@ -9,7 +9,7 @@ repository = "https://github.com/W4ff1e/onvif-media-transcoder"
 publish = false
 
 [dependencies]
-base64 = "0.22.1"
+base64 = "0.23.1"
 chrono = "0.4.42"
 clap = { version = "4.5.52", features = ["derive", "env"] }
 md5 = "0.8"
